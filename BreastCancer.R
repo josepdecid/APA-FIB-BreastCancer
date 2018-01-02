@@ -6,11 +6,19 @@
 # Q1 2017-2018
 ####################################################################
 
+# install.packages('corrplot')
+# install.packages('caTools')
+# install.packages('ggplot2')
+# install.packages('randomForest') 
+# install.packages('caret')
+# install.packages('e1071')
+
 library(corrplot)
 library(caTools)
 library(ggplot2)
 library(randomForest)
 library(caret)
+library(e1071)
 
 ####################################################################
 # SECTION 1: Data Preprocessing
@@ -37,6 +45,8 @@ corrplot(correlation, order = 'hclust', tl.cex = 1, addrect = 8)
 split = sample.split(dataset$diagnosis, SplitRatio = 0.8)
 trainingSet = subset(dataset, split = TRUE)
 testSet = subset(dataset, split = FALSE)
+trainingSet = subset(dataset, split == TRUE)
+testSet = subset(dataset, split == FALSE)
 
 # Feature Scaling
 trainingSet[, 2:31] <- scale(trainingSet[, 2:31])
