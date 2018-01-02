@@ -12,13 +12,17 @@
 # install.packages('randomForest') 
 # install.packages('caret')
 # install.packages('e1071')
+# install.packages('klaR')
 
 library(corrplot)
 library(caTools)
 library(ggplot2)
 library(randomForest)
+library(MASS)
 library(e1071)
+library(klaR)
 library(class)
+library(nnet)
 
 set.seed(422)
 
@@ -85,7 +89,9 @@ pred.rf <- predict(regressor.rf, newdata = test.set)
 (acc.rf <- (conf.rf[1, 1] + conf.rf[2, 2]) / dim(test.set)[1])
 (cv.rf = rfcv(trainx = dataset[-1],
               trainy = dataset$diagnosis,
-              cv.fold = 5))
+              cv.fold = 5,
+              scale="log", 
+              step=0.5))
 
 ### K-NN
 pred.knn <- knn(train = training.set[, -1],
@@ -114,7 +120,28 @@ pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
 ### SVM
 
 ### Naive Bayes
+model.nb <- naiveBayes(diagnosis ~ ., data = training.set)
+pred.nb <- predict(model.nb, newdata = test.set)
+(conf.nb <- table(pred.nb, test.set$diagnosis))
+(acc.nb <- (conf.nb[1, 1] + conf.nb[2, 2]) / dim(test.set)[1])
+
+
+# we obtain 87% accuracy, let's try with cross-validation method for training the model
+
+#-------------- Dona el putu mateix-------------------------
+train_control <- trainControl(method = 'LOOCV') #method="repeatedcv", number=10, repeats=3) # method="cv", number=10)
+#create model
+model.nbcv <- train(form = diagnosis ~ ., data = training.set, method = "nb", trControl=train_control)
+pred.nbcv <- predict(model.nbcv, newdata = test.set)
+
+(conf.nbcv <- table(pred.nbcv, test.set$diagnosis))
+(acc.nbcv <- (conf.nbcv[1, 1] + conf.nbcv[2, 2]) / dim(test.set)[1])
+#------------------------------------------------------------
 
 ### Neural Networks
+model.nnet <- nnet(diagnosis ~ ., data=training.set, size=3, maxit=500, decay=0)
+pred.nnet <- as.factor(predict (model.nnet, newdata = test.set, type = 'class'))
+(conf.nnet <- table(pred.nnet, test.set$diagnosis))
+(acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
 
 ### Decision Tree
