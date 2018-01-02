@@ -77,6 +77,7 @@ regressor.rf <- randomForest(formula = diagnosis ~ .,
                              data = training.set,
                              importance = TRUE,  # Most significant variables
                              ntree = 100)
+
 pred.rf <- predict(regressor.rf, newdata = test.set)
 
 # Random Forest Confusion matrix, Accuracy and Cross-Validation
@@ -97,6 +98,18 @@ pred.knn <- knn(train = training.set[, -1],
 (acc.knn <- (conf.knn[1, 1] + conf.knn[2, 2]) / dim(test.set)[1])
 
 ### Logistic
+classifier.log <- glm(formula = diagnosis ~ .,
+                      family = binomial,
+                      data = training.set)
+
+prob.log <- predict(classifier.log,
+                    type = 'response',
+                    newdata = test.set[-1])
+pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
+
+# Logistic Confusion matrix and accuracy
+(conf.log <- table(test.set[, 1], pred.log))
+(acc.log <- (conf.log[1, 1] + conf.log[2, 2]) / dim(test.set)[1])
 
 ### SVM
 
