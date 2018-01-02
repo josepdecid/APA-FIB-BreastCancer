@@ -87,6 +87,7 @@ table(predict(regressor.rf),trainingSet$diagnosis)   # With training set
 table(pred.rf, testSet$diagnosis)                    # With test set
 
 # with cross-validation
-regressor.rfcv = rfcv(trainx = trainingSet[2:31], trainy = trainingSet[1], cv.fold = 10 ) #TODO per provar
-
+regressor.rfcv = rfcv(trainx = dataset.norm[2:31], trainy = dataset.norm$diagnosis, cv.fold = 5) # aqui no se si utilitzar trainingSet o dataset.norm
+# with(regressor.rfcv, plot(n.var, error.cv, log="x", type="o", lwd=2))
+# pred.rfcv <- predict(regressor.rfcv, newdata = testSet)
 
