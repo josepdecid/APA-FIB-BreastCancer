@@ -19,16 +19,11 @@ summary(dataset)
 # There are also no strange or out of range values.
 
 # Converting diagnosis into factor variables
-dataset$diagnosis <- as.factor(dataset$diagnosis)
+diagnosis <- as.factor(dataset$diagnosis)
+dataset$diagnosis <- diagnosis
 table(dataset$diagnosis) # Unbalanced observations
 
 # Feature Scaling ????
-
-# We can see 3 different feature groups: 'mean', 'std error', and 'worst'
-# Extract groups into different variables
-features.mean <- dataset[, 3:12]
-features.sderr <- dataset[, 13:22]
-features.worst <- dataset[, 23:32]
 
 # Take a look at heavy corrlations among different variables
 library(corrplot)
@@ -55,5 +50,5 @@ pca.df <- as.data.frame(pca$x)
 
 library(ggplot2)
 ggplot(pca.df) +
-  geom_point(aes(x = PC1, y = PC2, col = dataset$diagnosis)) +
+  geom_point(aes(x = PC1, y = PC2, col = diagnosis)) +
   ggtitle('Diagnosis distribution over first two Principal Components')
