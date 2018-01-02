@@ -19,6 +19,9 @@ library(ggplot2)
 library(randomForest)
 library(caret)
 library(e1071)
+library(class)
+
+set.seed(422)
 
 ####################################################################
 # SECTION 1: Data Preprocessing
@@ -41,15 +44,16 @@ table(dataset$diagnosis) # Unbalanced observations
 correlation <- cor(dataset[, 2:31])
 corrplot(correlation, order = 'hclust', tl.cex = 1, addrect = 8)
 
-# Split dataset into training and test set
-split = sample.split(dataset$diagnosis, SplitRatio = 0.8)
-trainingSet = subset(dataset, split = TRUE)
-testSet = subset(dataset, split = FALSE)
-trainingSet = subset(dataset, split == TRUE)
-testSet = subset(dataset, split == FALSE)
-
 # Feature Scaling
-trainingSet[, 2:31] <- scale(trainingSet[, 2:31])
+dataset.norm <- dataset
+dataset.norm[, 2:31] <- scale(dataset.norm[, 2:31])
+
+# Split dataset into training and test set
+split = sample.split(dataset.norm$diagnosis, SplitRatio = 0.8)
+trainingSet = subset(dataset.norm, split == TRUE)
+testSet = subset(dataset.norm, split == FALSE)
+#trainingSet$diagnosis = as.factor(trainingSet$diagnosis)
+#testSet$diagnosis = as.factor(testSet$diagnosis)
 
 # As we have a lot of dimensions and very correlated data, let's apply a PCA
 pca <- prcomp(dataset[, 2:31], center = TRUE, scale = TRUE)
@@ -72,8 +76,17 @@ ggplot(pca.df) +
 ####################################################################
 
 # Random Forest Regression
-regressor.rf <- randomForest(formula = diagnosis ~ .,
+regressor.rf <- randomForest(formula = diagnosis ~ ., 
                              data = trainingSet,
+                             importance=TRUE,    # tells us which variables are more significant
                              ntree = 100)
 pred.rf <- predict(regressor.rf, newdata = testSet)
 (conf.rf <- confusionMatrix(pred.rf, testSet$diagnosis, positive = 'M'))
+# Small table results
+table(predict(regressor.rf),trainingSet$diagnosis)   # With training set
+table(pred.rf, testSet$diagnosis)                    # With test set
+
+# with cross-validation
+regressor.rfcv = rfcv(trainx = trainingSet[2:31], trainy = trainingSet[1], cv.fold = 10 ) #TODO per provar
+
+
