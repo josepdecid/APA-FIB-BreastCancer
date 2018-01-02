@@ -9,6 +9,7 @@
 # install.packages('corrplot')
 # install.packages('caTools')
 # install.packages('ggplot2')
+# install.packages('rpart')
 # install.packages('randomForest') 
 # install.packages('caret')
 # install.packages('e1071')
@@ -43,8 +44,8 @@ training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
 
 # Feature Scaling
-training.set[, 2:31] <- scale(training.set[, 2:31])
-test.set[, 2:31] <- scale(test.set[, 2:31])
+training.set[, -1] <- scale(training.set[, -1])
+test.set[, -1] <- scale(test.set[, -1])
 
 # As we have a lot of dimensions and very correlated data, let's apply a PCA
 pca <- prcomp(dataset[, 2:31], center = TRUE, scale = TRUE)
@@ -93,7 +94,17 @@ pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
 (acc.log <- (conf.log[1, 1] + conf.log[2, 2]) / dim(test.set)[1])
 
 ### Decision Tree
+library(rpart)
+classifier.dt <- rpart(formula = diagnosis ~ .,
+                       data = training.set)
 
+pred.dt <- predict(classifier.dt,
+                   newdata = test.set[-1],
+                   type = 'class')
+
+# Decision Tree Confusion matrix and Accuracy
+(conf.dt <- table(test.set[, 1], pred.dt))
+(acc.dt <- (conf.dt[1, 1] + conf.dt[2, 2]) / dim(test.set)[1])
 
 ### Random Forest Regression
 library(randomForest)
