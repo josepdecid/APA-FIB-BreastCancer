@@ -13,6 +13,7 @@
 # install.packages('randomForest') 
 # install.packages('caret')
 # install.packages('e1071')
+# install.packages('lfda')
 set.seed(42)
 
 ####################################################################
@@ -63,6 +64,17 @@ library(ggplot2)
 ggplot(pca.df) +
   geom_point(aes(x = PC1, y = PC2, col = diagnosis)) +
   ggtitle('Diagnosis distribution over first two Principal Components')
+
+
+# For further visualization, we will perform linear discriminant analysis (LDA) and obtain
+# linear discriminats
+lda <- lda(diagnosis ~ ., data=dataset)
+lda.df <- as.data.frame(lda$scaling)
+
+# fischer discriminant
+library(lfda)
+fda <- lfda(dataset[-1], dataset[1], r = 3, metric='plain')
+fda.df <- as.data.frame(fda$Z)
 
 ####################################################################
 # SECTION 2: Model Building
@@ -145,27 +157,88 @@ pred.nb <- predict(model.nb, newdata = test.set)
 (conf.nb <- table(pred.nb, test.set$diagnosis))
 (acc.nb <- (conf.nb[1, 1] + conf.nb[2, 2]) / dim(test.set)[1])
 
-# we obtain 87% accuracy, let's try with cross-validation method for training the model
+# we obtain 94% accuracy, let's try with cross-validation method for training the model
 
-#-------------- Dona el putu mateix-------------------------
+#-------------- Dona el putu mateix -------------------------
 library(MASS)
 library(caret)
 library(klaR)
-train_control <- trainControl(method = 'LOOCV') #method="repeatedcv", number=10, repeats=3) # method="cv", number=10)
+train_control <- trainControl(method="cv",
+                              number = 5,
+                              # preProcOptions = list(thresh = 0.99), # threshold for pca preprocess
+                              classProbs = TRUE,
+                              summaryFunction = twoClassSummary)
 #create model
 model.nbcv <- train(form = diagnosis ~ ., data = training.set, method = "nb", trControl=train_control)
 pred.nbcv <- predict(model.nbcv, newdata = test.set)
 
 (conf.nbcv <- table(pred.nbcv, test.set$diagnosis))
 (acc.nbcv <- (conf.nbcv[1, 1] + conf.nbcv[2, 2]) / dim(test.set)[1])
+# Now we get 94-96% accuracy with cross-validation
 #------------------------------------------------------------
 
 ### Neural Networks
 library(nnet)
-classifier.nn <- nnet(diagnosis ~ .,
+set.seed(42)
+classifier.nn <- nnet(formula = diagnosis ~ .,
                       data = training.set,
-                      size = 3, maxit = 500, decay = 0)
+                      size = 10, maxit = 2000, decay = 0)
 
 pred.nn <- as.factor(predict(classifier.nn, newdata = test.set, type = 'class'))
 (conf.nn <- table(pred.nn, test.set$diagnosis))
 (acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
+
+par(mfrow=c(3,2))
+for (i in 1:3)
+{
+  set.seed(3)
+  nn1 <- nnet(formula=diagnosis ~ ., data=dataset.norm, size=i, decay=0, maxit=2000,trace=T)
+  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
+ 
+  pca.test <- prcomp(dataset.norm[, 2:31])
+  pca.test.df <- as.data.frame(pca.test$x)
+  plot(pca.df$PC2 ~ pca.df$PC1,pch=20,col=c('red','green')[pred.nn1])
+  title(main=paste(i,'hidden unit(s)'))
+  plot(pca.df$PC2 ~ pca.df$PC1, pch=20,col=c('red','green')[as.numeric(dataset.norm$diagnosis)])
+  title(main='Real Diagnosis')
+}
+
+par(mfrow=c(3,2))
+for (i in 1:3)
+{
+  set.seed(42)
+  nn1 <- nnet(formula=diagnosis ~ ., data=dataset.norm, size=i, decay=0, maxit=2000,trace=T)
+  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
+
+  # scatter3D(fda.df$V1, fda.df$V2, fda.df$V3, pch=20,col=c('red','green')[pred.nn1])
+  plot(fda.df$V2 ~ fda.df$V1, pch=20,col=c('red','green')[pred.nn1])
+  title(main=paste(i,'hidden unit(s)'))
+  plot(fda.df$V2 ~ fda.df$V1, pch=20,col=c('red','green')[as.numeric(dataset.norm$diagnosis)])
+  title(main='Real Diagnosis')
+}
+
+par(mfrow=c(3,2))
+for (i in 1:3)
+{
+  set.seed(42)
+  nn1 <- nnet(formula=diagnosis ~ ., data=dataset.norm, size=i, decay=0, maxit=2000,trace=T)
+  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
+  
+  plot(fda.df$V3 ~ fda.df$V1, pch=20,col=c('red','green')[pred.nn1])
+  title(main=paste(i,'hidden unit(s)'))
+  plot(fda.df$V3 ~ fda.df$V1, pch=20,col=c('red','green')[as.numeric(dataset.norm$diagnosis)])
+  title(main='Real Diagnosis')
+}
+par(mfrow=c(1,1))
+
+# With 3 hidden units, que NN learns quite perfectly with normalized data
+
+# This method finds that best number of hidden units is 5 and decay weight value 0.1
+set.seed(42)
+nnet <- train(form = diagnosis ~ ., data=training.set, method = 'nnet', metric = 'Accuracy', maxit=2000,trace=T, linout = F)
+pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
+(conf.nnet <- table(pred.nnet, test.set$diagnosis))
+(acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
+
+#coef(nnet)
+
