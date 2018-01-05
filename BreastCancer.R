@@ -191,15 +191,15 @@ pred.nn <- as.factor(predict(classifier.nn, newdata = test.set, type = 'class'))
 par(mfrow=c(3,2))
 for (i in 1:3)
 {
-  set.seed(3)
-  nn1 <- nnet(formula=diagnosis ~ ., data=dataset.norm, size=i, decay=0, maxit=2000,trace=T)
+  set.seed(42)
+  nn1 <- nnet(formula=diagnosis ~ ., data=training.set, size=i, decay=0, maxit=2000,trace=T)
   pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
  
-  pca.test <- prcomp(dataset.norm[, 2:31])
-  pca.test.df <- as.data.frame(pca.test$x)
-  plot(pca.df$PC2 ~ pca.df$PC1,pch=20,col=c('red','green')[pred.nn1])
+  pca.tr <- prcomp(training.set[, 2:31])
+  pca.tr.df <- as.data.frame(pca.tr$x)
+  plot(pca.tr.df$PC2 ~ pca.tr.df$PC1,pch=20,col=c('red','green')[pred.nn1])
   title(main=paste(i,'hidden unit(s)'))
-  plot(pca.df$PC2 ~ pca.df$PC1, pch=20,col=c('red','green')[as.numeric(dataset.norm$diagnosis)])
+  plot(pca.tr.df$PC2 ~ pca.tr.df$PC1, pch=20,col=c('red','green')[as.numeric(training.set$diagnosis)])
   title(main='Real Diagnosis')
 }
 
@@ -207,28 +207,17 @@ par(mfrow=c(3,2))
 for (i in 1:3)
 {
   set.seed(42)
-  nn1 <- nnet(formula=diagnosis ~ ., data=dataset.norm, size=i, decay=0, maxit=2000,trace=T)
+  nn1 <- nnet(formula=diagnosis ~ ., data=training.set, size=i, decay=0, maxit=2000,trace=T)
   pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
 
-  # scatter3D(fda.df$V1, fda.df$V2, fda.df$V3, pch=20,col=c('red','green')[pred.nn1])
-  plot(fda.df$V2 ~ fda.df$V1, pch=20,col=c('red','green')[pred.nn1])
+  fda.tr <- lfda(training.set[-1], training.set[1], r = 3, metric='plain')
+  fda.tr.df <- as.data.frame(fda.tr$Z)
+  plot(fda.tr.df$V3 ~ fda.tr.df$V1, pch=20,col=c('red','green')[pred.nn1])
   title(main=paste(i,'hidden unit(s)'))
-  plot(fda.df$V2 ~ fda.df$V1, pch=20,col=c('red','green')[as.numeric(dataset.norm$diagnosis)])
+  plot(fda.tr.df$V3 ~ fda.tr.df$V1, pch=20,col=c('red','green')[as.numeric(training.set$diagnosis)])
   title(main='Real Diagnosis')
 }
 
-par(mfrow=c(3,2))
-for (i in 1:3)
-{
-  set.seed(42)
-  nn1 <- nnet(formula=diagnosis ~ ., data=dataset.norm, size=i, decay=0, maxit=2000,trace=T)
-  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
-  
-  plot(fda.df$V3 ~ fda.df$V1, pch=20,col=c('red','green')[pred.nn1])
-  title(main=paste(i,'hidden unit(s)'))
-  plot(fda.df$V3 ~ fda.df$V1, pch=20,col=c('red','green')[as.numeric(dataset.norm$diagnosis)])
-  title(main='Real Diagnosis')
-}
 par(mfrow=c(1,1))
 
 # With 3 hidden units, que NN learns quite perfectly with normalized data
@@ -241,4 +230,18 @@ pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
 (acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
 
 #coef(nnet)
+train_control <- trainControl(method="LOOCV", number = 10)
+grid <- expand.grid(.decay = c(0, 0.0001, 0.001, 0.01, 0.1), .size = c(1,2,3,4))
+set.seed(42)
+nnet <- train(form = diagnosis ~.,
+              data = training.set,
+              method = 'nnet', 
+              maxit = 2000,
+              metric="Accuracy", 
+              tuneGrid = grid, 
+              trControl = train_control)
 
+pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
+(conf.nn <- table(pred.nn, test.set$diagnosis))
+(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
+# 98.2% accuracy
