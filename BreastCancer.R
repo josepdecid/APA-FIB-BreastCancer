@@ -10,7 +10,7 @@
 # install.packages('caTools')
 # install.packages('ggplot2')
 # install.packages('rpart')
-# install.packages('randomForest') 
+# install.packages('randomForest')
 # install.packages('caret')
 # install.packages('e1071')
 # install.packages('lfda')
@@ -65,7 +65,6 @@ ggplot(pca.df) +
   geom_point(aes(x = PC1, y = PC2, col = diagnosis)) +
   ggtitle('Diagnosis distribution over first two Principal Components')
 
-
 # For further visualization, we will perform linear discriminant analysis (LDA) and obtain
 # linear discriminats
 lda <- lda(diagnosis ~ ., data=dataset)
@@ -75,6 +74,12 @@ lda.df <- as.data.frame(lda$scaling)
 library(lfda)
 fda <- lfda(dataset[-1], dataset[1], r = 3, metric='plain')
 fda.df <- as.data.frame(fda$Z)
+
+# Let's get a PCA version for training and test sets.
+pca.training <- prcomp(training.set[, 2:31], center = TRUE)
+pca.training.df <- as.data.frame(pca.training$x)
+pca.test <- prcomp(test.set[, 2:31], center = TRUE)
+pca.test.df <- as.data.frame(pca.test$x)
 
 ####################################################################
 # SECTION 2: Model Building
@@ -90,6 +95,11 @@ pred.knn <- knn(train = training.set[, -1],
 # K-NN Confusion matrix and accuracy
 (conf.knn <- table(test.set[, 1], pred.knn))
 (acc.knn <- (conf.knn[1, 1] + conf.knn[2, 2]) / dim(test.set)[1])
+
+# K-NN Visualitzation
+ggplot(pca.test.df) +
+  geom_point(aes(x = PC1, y = PC2, col = pred.knn)) +
+  ggtitle('Diagnosis distribution over first two Principal Components')
 
 ### Logistic
 classifier.log <- glm(formula = diagnosis ~ .,
