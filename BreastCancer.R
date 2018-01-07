@@ -20,72 +20,92 @@ set.seed(42)
 # SECTION 1: Data Preprocessing
 ####################################################################
 
+# Dataset lecture ----
+
 dataset <- read.csv('data.csv')
-# Remove unnecessary column 'X'
+# Remove unnecessary NaN column 'X' and useless 'id'.
 dataset <- subset(dataset, select = -c(X, id))
 
+# Let's check that there are no NA or out-of-range values.
+# So that, it's not necessary to deal with missing or invalid data.
 summary(dataset)
-# We see that there are no NA values.
-# There are also no strange or out of range values.
 
-# Converting diagnosis into factor variables
+# Convert diagnosis into factor variables.
 diagnosis <- as.factor(dataset$diagnosis)
 dataset$diagnosis <- diagnosis
-table(dataset$diagnosis)  # Unbalanced observations
 
-# Take a look at heavy corrlations among different variables
+# Check that diagnosis distribution is very unbalanced.
+plot(x = diagnosis, main = 'Diagnosis distribution',
+     col = c('#F8766D', '#00BFC4'),
+     xlab = 'Diagnosis', ylab = 'Count')
+
+# Check that there are heavy corrlations among different variables.
 library(corrplot)
-correlation <- cor(dataset[, 2:31])
+correlation <- cor(dataset[, -1])
 corrplot(correlation, order = 'hclust', tl.cex = 1, addrect = 8)
 
-# Split dataset into training and test set
+# Training and Test set spliting ----
 library(caTools)
 split = sample.split(dataset$diagnosis, SplitRatio = 0.8)
 training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
 
-# Feature Scaling
+# Feature Scaling ----
+dataset[, -1] <- scale(dataset[, -1])
 training.set[, -1] <- scale(training.set[, -1])
 test.set[, -1] <- scale(test.set[, -1])
 
-# As we have a lot of dimensions and very correlated data, let's apply a PCA
-pca <- prcomp(dataset[, 2:31], center = TRUE, scale = TRUE)
-plot(pca, type="l")
+# PCA ----
+pca <- prcomp(dataset[, 2:31])
 
 # Take a look at the variance proportion given by each component
 summary(pca)
+plot(x = pca, main = 'Variance / PC', type = 'l')
 
-# Seting a Statistical significance level SL = 0.05
-# We obserbe that with 10 components we get over 0.95
-# We would need 20 extra components only to obtain an extra 0.05, so we discard this ones.
+# Seting an arbitrary statistical Significance Level SL = 0.05
+# Observe that with 10 components we get over 0.95 of variance explained.
+# 20 extra components would only explain an extra 0.05, so we discard these ones.
 pca.df <- as.data.frame(pca$x)
 
+# Display diagnosis over 2D (First two PC).
 library(ggplot2)
-ggplot(pca.df) +
-  geom_point(aes(x = PC1, y = PC2, col = diagnosis)) +
-  ggtitle('Diagnosis distribution over first two Principal Components')
+ggplot(pca.df, aes(x = PC1, y = PC2, col = diagnosis)) +
+  ggtitle('Diagnosis distribution over first two PC') +
+  geom_point(alpha = 0.8)
 
-# For further visualization, we will perform linear discriminant analysis (LDA) and obtain
-# linear discriminats
-lda <- lda(diagnosis ~ ., data=dataset)
-lda.df <- as.data.frame(lda$scaling)
+# We can see that data is easily separable.
 
-# fischer discriminant
-library(lfda)
-fda <- lfda(dataset[-1], dataset[1], r = 3, metric='plain')
-fda.df <- as.data.frame(fda$Z)
+# Create PCA for training and test set.
+training.set.pca <- subset(pca.df, split == TRUE)
+test.set.pca <- subset(pca.df, split == FALSE)
 
-# Let's get a PCA version for training and test sets.
-pca.training <- prcomp(training.set[, 2:31], center = TRUE)
-pca.training.df <- as.data.frame(pca.training$x)
-pca.test <- prcomp(test.set[, 2:31], center = TRUE)
-pca.test.df <- as.data.frame(pca.test$x)
+# LCA ----
+library(MASS)
+lda <- lda(formula = diagnosis ~ ., data = dataset)
+lda.df <- as.data.frame(predict(lda, dataset))
+lda.df$diagnosis <- dataset$diagnosis
+                        
+# Display diagnosis over 1D (First LD).
+ggplot(lda.df, aes(x = LD1, y = 0, col = diagnosis)) +
+  ggtitle('Diagnosis distribution over first LD') +
+  geom_point(alpha = 0.8)
+
+# Display diagnosis over 2D (First two LD).
+ggplot(lda.df, aes(x = LD1, fill = diagnosis)) +
+  ggtitle('Diagnosis density over first LD') +
+  geom_density(alpha = 0.8)
+
+# We can also see that data is easily separable.
+
+# Create LDA for training and test set.
+training.set.lda <- subset(lda.df, split == TRUE)
+test.set.lda <- subset(lda.df, split == FALSE)
 
 ####################################################################
 # SECTION 2: Model Building
 ####################################################################
 
-### K-NN
+# K-NN ----
 library(class)
 pred.knn <- knn(train = training.set[, -1],
                 test = test.set[, -1],
@@ -96,12 +116,7 @@ pred.knn <- knn(train = training.set[, -1],
 (conf.knn <- table(test.set[, 1], pred.knn))
 (acc.knn <- (conf.knn[1, 1] + conf.knn[2, 2]) / dim(test.set)[1])
 
-# K-NN Visualitzation
-ggplot(pca.test.df) +
-  geom_point(aes(x = PC1, y = PC2, col = pred.knn)) +
-  ggtitle('Diagnosis distribution over first two Principal Components')
-
-### Logistic
+# Logistic ----
 classifier.log <- glm(formula = diagnosis ~ .,
                       family = binomial,
                       data = training.set)
@@ -115,7 +130,7 @@ pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
 (conf.log <- table(test.set[, 1], pred.log))
 (acc.log <- (conf.log[1, 1] + conf.log[2, 2]) / dim(test.set)[1])
 
-### Decision Tree
+# Decision Tree ----
 library(rpart)
 classifier.dt <- rpart(formula = diagnosis ~ .,
                        data = training.set)
@@ -128,7 +143,7 @@ pred.dt <- predict(classifier.dt,
 (conf.dt <- table(test.set[, 1], pred.dt))
 (acc.dt <- (conf.dt[1, 1] + conf.dt[2, 2]) / dim(test.set)[1])
 
-### Random Forest Regression
+# Random Forest Regression ----
 library(randomForest)
 regressor.rf <- randomForest(formula = diagnosis ~ ., 
                              data = training.set,
@@ -144,7 +159,7 @@ pred.rf <- predict(regressor.rf, newdata = test.set)
               trainy = dataset$diagnosis,
               cv.fold = 5, scale = 'log', step = 0.5))
 
-### SVM
+# SVM ----
 library(e1071)
 classifier.svm <- svm(formula = diagnosis ~ .,
                       data = training.set,
@@ -157,7 +172,7 @@ pred.svm <- predict(classifier.svm, newdata = test.set[-1])
 (conf.svm <- table(test.set[, 1], pred.svm))
 (acc.svm <- (conf.svm[1, 1] + conf.svm[2, 2]) / dim(test.set)[1])
 
-### Naive Bayes
+# Naive Bayes ----
 model.nb <- naiveBayes(diagnosis ~ .,
                        data = training.set)
 
@@ -169,7 +184,8 @@ pred.nb <- predict(model.nb, newdata = test.set)
 
 # we obtain 94% accuracy, let's try with cross-validation method for training the model
 
-#-------------- Dona el putu mateix -------------------------
+
+# Dona el putu mateix
 library(MASS)
 library(caret)
 library(klaR)
@@ -187,7 +203,7 @@ pred.nbcv <- predict(model.nbcv, newdata = test.set)
 # Now we get 94-96% accuracy with cross-validation
 #------------------------------------------------------------
 
-### Neural Networks
+# Neural Networks ----
 library(nnet)
 set.seed(42)
 classifier.nn <- nnet(formula = diagnosis ~ .,
