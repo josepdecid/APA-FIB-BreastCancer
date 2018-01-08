@@ -14,6 +14,7 @@
 # install.packages('caret')
 # install.packages('e1071')
 # install.packages('lfda')
+# install.packages('xgboost')
 set.seed(42)
 
 ####################################################################
@@ -39,10 +40,39 @@ plot(x = diagnosis, main = 'Diagnosis distribution',
      col = c('#F8766D', '#00BFC4'),
      xlab = 'Diagnosis', ylab = 'Count')
 
-# Check that there are heavy corrlations among different variables.
+# Feature Scaling ----
+dataset[, -1] <- scale(dataset[, -1],
+                       scale = TRUE,
+                       center = TRUE)
+
+# Correlation ----
 library(corrplot)
 correlation <- cor(dataset[, -1])
-corrplot(correlation, order = 'hclust', tl.cex = 1, addrect = 8)
+corrplot(corr = correlation, order = 'hclust',
+         tl.col = 'black', tl.cex = 0.8)
+
+# Filter those with more than 95% correlation
+correlation.more <- ifelse(correlation >= 0.95, correlation, 0)
+corrplot(corr = correlation.more, order = 'hclust',
+         tl.col = 'black', tl.cex = 0.8)
+
+# There are some variables with almost correlation of 1
+# Let's apply a feature selection removing very correlated variables.
+
+# Feature selection ----
+
+# area_se, radius_se, perimeter_se -> area_se
+dataset$radius_se <- NULL
+dataset$perimeter_se <- NULL
+# area_mean, radius_mean, perimeter_mean -> area_mean
+dataset$radius_mean <- NULL
+dataset$perimeter_mean <- NULL
+# area_worst, radius_worst, perimeter_worst -> area_worst
+dataset$radius_worst <- NULL
+dataset$area_worst <- NULL
+
+# Now let's apply feature extraction (PCA or LDA) because we
+# can easily reduce dimensionality without losing so much information.
 
 # Training and Test set spliting ----
 library(caTools)
@@ -50,71 +80,80 @@ split = sample.split(dataset$diagnosis, SplitRatio = 0.8)
 training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
 
-# Feature Scaling ----
-dataset[, -1] <- scale(dataset[, -1])
-training.set[, -1] <- scale(training.set[, -1])
-test.set[, -1] <- scale(test.set[, -1])
-
 # PCA ----
-pca <- prcomp(dataset[, 2:31])
-
-# Take a look at the variance proportion given by each component
-summary(pca)
-plot(x = pca, main = 'Variance / PC', type = 'l')
-
-# Seting an arbitrary statistical Significance Level SL = 0.05
-# Observe that with 10 components we get over 0.95 of variance explained.
-# 20 extra components would only explain an extra 0.05, so we discard these ones.
-pca.df <- as.data.frame(pca$x)
-
-# Display diagnosis over 2D (First two PC).
-library(ggplot2)
-ggplot(pca.df, aes(x = PC1, y = PC2, col = diagnosis)) +
-  ggtitle('Diagnosis distribution over first two PC') +
-  geom_point(alpha = 0.8)
-
-# We can see that data is easily separable.
+library(caret)
+(pca <- preProcess(x = training.set[-1],
+                   method = 'pca',
+                   thresh = 0.95))
 
 # Create PCA for training and test set.
-training.set.pca <- subset(pca.df, split == TRUE)
-test.set.pca <- subset(pca.df, split == FALSE)
+training.set.pca <- predict(pca, newdata = training.set)
+test.set.pca <- predict(pca, newdata = test.set)
+
+# Observe that with 10 components we get over 0.95 of variance explained.
+# 20 extra components would only explain an extra 0.05, so we discard these ones.
+
+# Display diagnosis over 2D (First two PC).
+# We can see that data is easily separable.
+library(ggplot2)
+ggplot(training.set.pca, aes(x = PC1, y = PC2, col = diagnosis)) +
+  ggtitle('Diagnosis distribution over first two PC (training)') +
+  geom_point(alpha = 0.8)
 
 # LCA ----
 library(MASS)
-lda <- lda(formula = diagnosis ~ ., data = dataset)
-lda.df <- as.data.frame(predict(lda, dataset))
-lda.df$diagnosis <- dataset$diagnosis
-                        
-# Display diagnosis over 1D (First LD).
-ggplot(lda.df, aes(x = LD1, y = 0, col = diagnosis)) +
-  ggtitle('Diagnosis distribution over first LD') +
-  geom_point(alpha = 0.8)
-
-# Display diagnosis over 2D (First two LD).
-ggplot(lda.df, aes(x = LD1, fill = diagnosis)) +
-  ggtitle('Diagnosis density over first LD') +
-  geom_density(alpha = 0.8)
-
-# We can also see that data is easily separable.
+lda <- lda(formula = diagnosis ~ .,
+           data = dataset)
 
 # Create LDA for training and test set.
-training.set.lda <- subset(lda.df, split == TRUE)
-test.set.lda <- subset(lda.df, split == FALSE)
+training.set.lda <- as.data.frame(predict(lda, training.set))
+training.set.lda <- training.set.lda[c(1, 4)]
+colnames(training.set.lda) <- c('diagnosis', 'LD1')
+
+test.set.lda <- as.data.frame(predict(lda, test.set))
+test.set.lda <- test.set.lda[c(1, 4)]
+colnames(test.set.lda) <- c('diagnosis', 'LD1')
+                        
+# Display diagnosis over 1D.
+ggplot(training.set.lda, aes(x = LD1, y = 0, col = diagnosis)) +
+  ggtitle('Diagnosis distribution over LD1 (training)') +
+  geom_point(alpha = 0.8)
+
+# Display diagnosis over 2D (Density).
+ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
+  ggtitle('Diagnosis density over first LD (training)') +
+  geom_density(alpha = 0.8)
+
+# We can conclude that data is easily separable.
 
 ####################################################################
 # SECTION 2: Model Building
 ####################################################################
 
-# K-NN ----
-library(class)
-pred.knn <- knn(train = training.set[, -1],
-                test = test.set[, -1],
-                cl = training.set[, 1],
-                k = 5)
+# Let's define a common trainControl to set the same train validation in all methods
+trc <- trainControl(method = 'repeatedcv',
+                    number = 5,
+                    repeats = 5,
+                    classProbs = TRUE,
+                    summaryFunction = twoClassSummary)
 
-# K-NN Confusion matrix and accuracy
-(conf.knn <- table(test.set[, 1], pred.knn))
-(acc.knn <- (conf.knn[1, 1] + conf.knn[2, 2]) / dim(test.set)[1])
+# K-NN ----
+classifier.knn <- train(form = diagnosis ~ .,
+                        data = training.set,
+                        method = 'knn',
+                        metric = 'ROC',
+                        trControl = trc,
+                        tuneLength = 20)
+
+pred.knn <- predict(classifier.knn,
+                    newdata = test.set)
+
+# K plot, Confusion matrix and Accuracy.
+plot(classifier.knn)
+(conf.knn <- confusionMatrix(data = pred.knn,
+                             reference = test.set$diagnosis,
+                             positive = 'M'))
+(acc.knn <- mean(pred.knn == test.set$diagnosis))
 
 # Logistic ----
 classifier.log <- glm(formula = diagnosis ~ .,
@@ -126,82 +165,88 @@ prob.log <- predict(classifier.log,
                     newdata = test.set[-1])
 pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
 
-# Logistic Confusion matrix and accuracy
+# Logistic Confusion matrix and accuracy.
 (conf.log <- table(test.set[, 1], pred.log))
 (acc.log <- (conf.log[1, 1] + conf.log[2, 2]) / dim(test.set)[1])
 
-# Decision Tree ----
-library(rpart)
-classifier.dt <- rpart(formula = diagnosis ~ .,
-                       data = training.set)
-
-pred.dt <- predict(classifier.dt,
-                   newdata = test.set[-1],
-                   type = 'class')
-
-# Decision Tree Confusion matrix and Accuracy
-(conf.dt <- table(test.set[, 1], pred.dt))
-(acc.dt <- (conf.dt[1, 1] + conf.dt[2, 2]) / dim(test.set)[1])
-
 # Random Forest Regression ----
-library(randomForest)
-regressor.rf <- randomForest(formula = diagnosis ~ ., 
-                             data = training.set,
-                             importance = TRUE,  # Most significant variables
-                             ntree = 100)
+classifier.rf <- train(form = diagnosis ~ .,
+                       data = training.set,
+                       method = 'ranger',
+                       metric = 'ROC',
+                       trControl = trc)
 
-pred.rf <- predict(regressor.rf, newdata = test.set)
+pred.rf <- predict(classifier.rf,
+                   newdata = test.set)
 
-# Random Forest Confusion matrix, Accuracy and Cross-Validation
-(conf.rf <- table(test.set[, 1], pred.rf))
-(acc.rf <- (conf.rf[1, 1] + conf.rf[2, 2]) / dim(test.set)[1])
-(cv.rf = rfcv(trainx = dataset[-1],
-              trainy = dataset$diagnosis,
-              cv.fold = 5, scale = 'log', step = 0.5))
+# nTree plot, Confusion matrix, Accuracy.
+plot(classifier.rf)
+(conf.rf <- confusionMatrix(data = pred.rf,
+                            reference = test.set$diagnosis,
+                            positive = 'M'))
+(acc.rf <- mean(pred.rf == test.set$diagnosis))
 
 # SVM ----
-library(e1071)
-classifier.svm <- svm(formula = diagnosis ~ .,
-                      data = training.set,
-                      type = 'C-classification',
-                      kernel = 'linear')
+classifier.svm.line <- train(form = diagnosis ~ .,
+                             data = training.set,
+                             method = 'svmLinear',
+                             metric = 'ROC',
+                             trControl = trc,
+                             trace = FALSE)
 
-pred.svm <- predict(classifier.svm, newdata = test.set[-1])
+classifier.svm.poly <- train(form = diagnosis ~ .,
+                             data = training.set,
+                             method = 'svmPoly',
+                             metric = 'ROC',
+                             trControl = trc,
+                             trace = FALSE)
 
-# SVM Confusion matrix and accuracy
-(conf.svm <- table(test.set[, 1], pred.svm))
-(acc.svm <- (conf.svm[1, 1] + conf.svm[2, 2]) / dim(test.set)[1])
+classifier.svm.gaus <- train(form = diagnosis ~ .,
+                             data = training.set,
+                             method = 'svmRadial',
+                             metric = 'ROC',
+                             trControl = trc,
+                             trace = FALSE)
+
+pred.svm.line <- predict(classifier.svm.line,
+                         newdata = test.set)
+pred.svm.poly <- predict(classifier.svm.poly,
+                         newdata = test.set)
+pred.svm.gaus <- predict(classifier.svm.gaus,
+                         newdata = test.set)
+
+# Cost plots, SVM Confusion matrix and accuracy.
+plot(classifier.svm.poly)
+plot(classifier.svm.gaus)
+(conf.svm.line <- confusionMatrix(data = classifier.svm.line,
+                                  reference = test.set$diagnosis,
+                                  positive = 'M'))
+(conf.svm.poly <- confusionMatrix(data = classifier.svm.poly,
+                                  reference = test.set$diagnosis,
+                                  positive = 'M'))
+(conf.svm.gaus <- confusionMatrix(data = classifier.svm.gaus,
+                                  reference = test.set$diagnosis,
+                                  positive = 'M'))
+(acc.svm.line <- mean(pred.svm.line == test.set$diagnosis))
+(acc.svm.poly <- mean(pred.svm.poly == test.set$diagnosis))
+(acc.svm.gaus <- mean(pred.svm.gaus == test.set$diagnosis))
 
 # Naive Bayes ----
-model.nb <- naiveBayes(diagnosis ~ .,
-                       data = training.set)
+classifier.nb <- train(form = diagnosis ~ .,
+                       data = training.set,
+                       method = 'nb',
+                       metric = 'ROC',
+                       trControl = trc,
+                       trace = FALSE)
 
-pred.nb <- predict(model.nb, newdata = test.set)
+pred.nb <- predict(classifier.nb, newdata = test.set)
 
-# Naive Bayes Confusion matrix and accuracy
-(conf.nb <- table(pred.nb, test.set$diagnosis))
-(acc.nb <- (conf.nb[1, 1] + conf.nb[2, 2]) / dim(test.set)[1])
-
-# we obtain 94% accuracy, let's try with cross-validation method for training the model
-
-
-# Dona el putu mateix
-library(MASS)
-library(caret)
-library(klaR)
-train_control <- trainControl(method="cv",
-                              number = 5,
-                              # preProcOptions = list(thresh = 0.99), # threshold for pca preprocess
-                              classProbs = TRUE,
-                              summaryFunction = twoClassSummary)
-#create model
-model.nbcv <- train(form = diagnosis ~ ., data = training.set, method = "nb", trControl=train_control)
-pred.nbcv <- predict(model.nbcv, newdata = test.set)
-
-(conf.nbcv <- table(pred.nbcv, test.set$diagnosis))
-(acc.nbcv <- (conf.nbcv[1, 1] + conf.nbcv[2, 2]) / dim(test.set)[1])
-# Now we get 94-96% accuracy with cross-validation
-#------------------------------------------------------------
+# Distribution type plot, Bayes Confusion matrix and accuracy.
+plot(classifier.nb, type = 'p', col = 'darkred')
+(conf.nb <- confusionMatrix(data = classifier.nb,
+                            reference = test.set$diagnosis,
+                            positive = 'M'))
+(acc.nb <- mean(pred.nb == test.set$diagnosis))
 
 # Neural Networks ----
 library(nnet)
@@ -271,3 +316,26 @@ pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
 (conf.nn <- table(pred.nn, test.set$diagnosis))
 (acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
 # 98.2% accuracy
+# Gradient Boosting ----
+tune.xgb <- expand.grid(
+  eta = c(0.01, 0.001, 0.0001),
+  nrounds = 500,
+  lambda = 1,
+  alpha = 0
+)
+
+classifier.xgb <- train(x = as.matrix(training.set[-1]),
+                        y = training.set$diagnosis,
+                        method = 'xgbLinear',
+                        metric = 'ROC',
+                        trControl = trc,
+                        tuneGrid = tune.xgb)
+
+pred.xgb <- predict(classifier.xgb,
+                    newdata = test.set)
+
+# Cost plots, Confusion matrix and accuracy.
+(conf.xgb <- confusionMatrix(data = classifier.xgb,
+                             reference = test.set$diagnosis,
+                             positive = 'M'))
+(acc.xgb <- mean(pred.xgb == test.set$diagnosis))
