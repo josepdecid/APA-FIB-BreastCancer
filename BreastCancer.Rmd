@@ -581,6 +581,7 @@ harm(props[1,1], props[2,2])
 ```
 
 # Neural Networks ----
+```{R}
 library(nnet)
 classifier.nn <- nnet(formula = diagnosis ~ .,
                       data = training.set,
@@ -630,8 +631,8 @@ nnet <- train(form = diagnosis ~ ., data=training.set, method = 'nnet', metric =
 pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
 (conf.nnet <- table(pred.nnet, test.set$diagnosis))
 (acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
-
-#coef(nnet)
+coef(nnet)
+```
 train_control <- trainControl(method="LOOCV", number = 10)
 grid <- expand.grid(decay = 10^seq(-3, 0, 0.3),
                     size = seq(1, 10))

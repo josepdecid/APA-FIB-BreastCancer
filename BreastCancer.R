@@ -66,6 +66,11 @@ dataset$perimeter_mean <- NULL
 dataset$radius_worst <- NULL
 dataset$area_worst <- NULL
 
+
+library(caret)
+scales <- list(x=list(relation="free"),y=list(relation="free"), cex=0.6)
+featurePlot(x=dataset[,-1], y=dataset$diagnosis, plot="density",scales=scales,
+            layout = c(4,6), auto.key = list(columns = 2), pch = "|")
 # Now let's apply feature extraction (PCA or LDA) because we
 # can easily reduce dimensionality without losing so much information.
 
@@ -268,6 +273,7 @@ for (i in 1:3)
 }
 
 par(mfrow=c(3,2))
+library(lfda)
 for (i in 1:3)
 {
   set.seed(42)
