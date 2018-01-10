@@ -51,12 +51,7 @@ correlation <- cor(dataset[, -1])
 corrplot(corr = correlation, order = 'hclust',
          tl.col = 'black', tl.cex = 0.8)
 
-# Filter those with more than 95% correlation
-correlation.more <- ifelse(correlation >= 0.95, correlation, 0)
-corrplot(corr = correlation.more, order = 'hclust',
-         tl.col = 'black', tl.cex = 0.8)
-
-# There are some variables with almost correlation of 1
+# There are some variables with almost a correlation of 1
 # Let's apply a feature selection removing very correlated variables.
 
 # Feature selection ----
@@ -92,6 +87,8 @@ test.set.pca <- predict(pca, newdata = test.set)
 
 # Observe that with 10 components we get over 0.95 of variance explained.
 # 20 extra components would only explain an extra 0.05, so we discard these ones.
+
+# TODO: Falta plot amb la variància que explica cada component
 
 # Display diagnosis over 2D (First two PC).
 # We can see that data is easily separable.
@@ -132,18 +129,17 @@ ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
 
 # Let's define a common trainControl to set the same train validation in all methods
 trc <- trainControl(method = 'repeatedcv',
-                    number = 5,
-                    repeats = 5,
-                    classProbs = TRUE,
-                    summaryFunction = twoClassSummary)
+                    number = 10,
+                    repeats = 5)
 
 # K-NN ----
 classifier.knn <- train(form = diagnosis ~ .,
                         data = training.set,
                         method = 'knn',
-                        metric = 'ROC',
                         trControl = trc,
-                        tuneLength = 20)
+                        tuneLength = 20,
+                        preProcess = c('center', 'scale'))
+classifier.knn
 
 pred.knn <- predict(classifier.knn,
                     newdata = test.set)
@@ -153,7 +149,7 @@ plot(classifier.knn)
 (conf.knn <- confusionMatrix(data = pred.knn,
                              reference = test.set$diagnosis,
                              positive = 'M'))
-(acc.knn <- mean(pred.knn == test.set$diagnosis))
+(acc.knn <- mean(pred.knn == test.set$diagnosis),)
 
 # Logistic ----
 classifier.log <- glm(formula = diagnosis ~ .,
@@ -173,8 +169,10 @@ pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
 classifier.rf <- train(form = diagnosis ~ .,
                        data = training.set,
                        method = 'ranger',
-                       metric = 'ROC',
-                       trControl = trc)
+                       trControl = trc,
+                       tuneLength = 20,
+                       preProcess = c('center', 'scale'))
+classifier.rf
 
 pred.rf <- predict(classifier.rf,
                    newdata = test.set)
@@ -190,21 +188,18 @@ plot(classifier.rf)
 classifier.svm.line <- train(form = diagnosis ~ .,
                              data = training.set,
                              method = 'svmLinear',
-                             metric = 'ROC',
                              trControl = trc,
                              trace = FALSE)
 
 classifier.svm.poly <- train(form = diagnosis ~ .,
                              data = training.set,
                              method = 'svmPoly',
-                             metric = 'ROC',
                              trControl = trc,
                              trace = FALSE)
 
 classifier.svm.gaus <- train(form = diagnosis ~ .,
                              data = training.set,
                              method = 'svmRadial',
-                             metric = 'ROC',
                              trControl = trc,
                              trace = FALSE)
 
@@ -235,7 +230,6 @@ plot(classifier.svm.gaus)
 classifier.nb <- train(form = diagnosis ~ .,
                        data = training.set,
                        method = 'nb',
-                       metric = 'ROC',
                        trControl = trc,
                        trace = FALSE)
 
@@ -250,7 +244,6 @@ plot(classifier.nb, type = 'p', col = 'darkred')
 
 # Neural Networks ----
 library(nnet)
-set.seed(42)
 classifier.nn <- nnet(formula = diagnosis ~ .,
                       data = training.set,
                       size = 10, maxit = 2000, decay = 0)
@@ -302,15 +295,14 @@ pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
 
 #coef(nnet)
 train_control <- trainControl(method="LOOCV", number = 10)
-grid <- expand.grid(.decay = c(0, 0.0001, 0.001, 0.01, 0.1), .size = c(1,2,3,4))
-set.seed(42)
+grid <- expand.grid(decay = 10^seq(-3, 0, 0.3),
+                    size = seq(1, 10))
 nnet <- train(form = diagnosis ~.,
               data = training.set,
               method = 'nnet', 
-              maxit = 2000,
-              metric="Accuracy", 
               tuneGrid = grid, 
-              trControl = train_control)
+              trControl = trc,
+              trace = FALSE)
 
 pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
 (conf.nn <- table(pred.nn, test.set$diagnosis))
@@ -327,7 +319,6 @@ tune.xgb <- expand.grid(
 classifier.xgb <- train(x = as.matrix(training.set[-1]),
                         y = training.set$diagnosis,
                         method = 'xgbLinear',
-                        metric = 'ROC',
                         trControl = trc,
                         tuneGrid = tune.xgb)
 
@@ -339,3 +330,16 @@ pred.xgb <- predict(classifier.xgb,
                              reference = test.set$diagnosis,
                              positive = 'M'))
 (acc.xgb <- mean(pred.xgb == test.set$diagnosis))
+
+####################################################################
+# SECTION 3: Model Comparaison
+####################################################################
+
+classifiers <- list(
+  KNN = classifier.knn,
+  SVM = classifier.svm.poly,
+  RF = classifier.rf,
+  NN = nnet,
+  GB = classifier.xgb)
+
+models.corr <- modelCor(classifiers)
