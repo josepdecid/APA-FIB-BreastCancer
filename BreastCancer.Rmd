@@ -84,6 +84,18 @@ dataset$area_worst <- NULL
 ```
 
 Once the dataset basic preprocessing is ready we proceed to split it into Training and Test set.
+We can explore how each features helps us to classify the data. 
+
+```{R}
+library(caret)
+scales <- list(x=list(relation="free"),y=list(relation="free"), cex=0.6)
+featurePlot(x=dataset[,-1], y=dataset$diagnosis, plot="density",scales=scales,
+            layout = c(6,4), auto.key = list(columns = 2), pch = "|")
+```
+
+Once the dataset basic preprocessing is ready we proceed to
+split it into Training and Test set.
+>>>>>>> c66e5c9f9f197fe6740c1ee4544a82f51d668228
 
 ```{R Split dataset}
 library(caTools)
