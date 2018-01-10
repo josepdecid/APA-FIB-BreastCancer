@@ -1,0 +1,616 @@
+####################################################################
+APA Project (FIB - UPC)
+Josep de Cid & Gonzalo Recio
+
+Breast Cancer Diagnostic
+Q1 2017-2018
+####################################################################
+
+First install necessary packages, skip  this step or some installations
+if some are already installed.
+
+```{R}
+install.packages('corrplot')
+install.packages('caTools')
+install.packages('ggplot2')
+install.packages('rpart')
+install.packages('randomForest')
+install.packages('caret')
+install.packages('e1071')
+install.packages('lfda')
+install.packages('xgboost')
+```
+
+####################################################################
+SECTION 1: Data Preprocessing
+####################################################################
+
+Let's start reading the dataset and removing unnecessary columns.
+- id is a useless column for classification
+- X is a NaN column
+
+```{R}
+set.seed(22413)
+
+dataset <- read.csv('data.csv')
+dataset <- subset(x = dataset,
+                  select = -c(X, id))
+
+summary(dataset)
+```
+
+Once checked that there are no NA or out of range values, we consider
+that it's not necessary to deal with missing or invalid data.
+
+We have to convert the dependant variable 'diagnosis' into factors (2 levels).
+The diagnosis distribution is very unbalanced, having 357 Benign and 212 Malign observations.
+
+As long as we have numeric variables that are shown in different scales, some methods must need
+to scale or center to work properly, like KNN, NN...
+
+```{R}
+diagnosis <- as.factor(dataset$diagnosis)
+dataset$diagnosis <- diagnosis
+
+summary(dataset$diagnosis)
+plot(x = diagnosis,
+     main = 'Diagnosis distribution',
+     xlab = 'Diagnosis',
+     ylab = 'Count')
+
+# Feature scaling
+dataset[, -1] <- scale(dataset[, -1],
+                       scale = TRUE,
+                       center = TRUE)
+```
+
+Let's look at the variables to check some correlation, and try to remove some unnecessary
+predictors with high correlation among them.
+
+```{R}
+library(corrplot)
+correlation <- cor(dataset[, -1])
+corrplot(corr = correlation,
+         order = 'hclust',
+         tl.col = 'black',
+         tl.cex = 0.8)
+```
+
+There are some variables with almost a correlation of 1.
+Let's apply a feature selection removing very correlated variables.
+
+```{R}
+# area_se, radius_se, perimeter_se -> area_se
+dataset$radius_se <- NULL
+dataset$perimeter_se <- NULL
+# area_mean, radius_mean, perimeter_mean -> area_mean
+dataset$radius_mean <- NULL
+dataset$perimeter_mean <- NULL
+# area_worst, radius_worst, perimeter_worst -> area_worst
+dataset$radius_worst <- NULL
+dataset$area_worst <- NULL
+```
+
+Once the dataset basic preprocessing is ready we proceed to
+split it into Training and Test set.
+
+```{R}
+library(caTools)
+split = sample.split(Y = dataset$diagnosis, SplitRatio = 0.8)
+training.set = subset(dataset, split == TRUE)
+test.set = subset(dataset, split == FALSE)
+```
+
+Now let's apply feature extraction (PCA or LDA) because we can
+easily reduce dimensionality without losing so much information.
+
+With 10 components we get over 0.95 of variance explained.
+We would need 14, extra components only to obtain an extra 0.05, so we discard these ones.
+
+```{R}
+pca <- prcomp(dataset[, -1])
+plot(pca, type = 'l')
+
+summary(pca)
+
+pca.df <- as.data.frame(pca$x)
+
+library(ggplot2)
+ggplot(pca.df) +
+  geom_point(aes(x = PC1, y = PC2, col = diagnosis)) +
+  ggtitle('Diagnosis distribution over first two Principal Components')
+```
+
+# LCA ----
+library(MASS)
+lda <- lda(formula = diagnosis ~ .,
+           data = dataset)
+
+# Create LDA for training and test set.
+training.set.lda <- as.data.frame(predict(lda, training.set))
+training.set.lda <- training.set.lda[c(1, 4)]
+colnames(training.set.lda) <- c('diagnosis', 'LD1')
+
+test.set.lda <- as.data.frame(predict(lda, test.set))
+test.set.lda <- test.set.lda[c(1, 4)]
+colnames(test.set.lda) <- c('diagnosis', 'LD1')
+                        
+# Display diagnosis over 1D.
+ggplot(training.set.lda, aes(x = LD1, y = 0, col = diagnosis)) +
+  ggtitle('Diagnosis distribution over LD1 (training)') +
+  geom_point(alpha = 0.8)
+
+# Display diagnosis over 2D (Density).
+ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
+  ggtitle('Diagnosis density over first LD (training)') +
+  geom_density(alpha = 0.8)
+
+# We can conclude that data is easily separable.
+
+####################################################################
+# SECTION 2: Model Building
+####################################################################
+
+# Let's define a common trainControl to set the same train validation in all methods
+trc <- trainControl(method = 'repeatedcv',
+                    number = 10,
+                    repeats = 5)
+
+# K-NN ----
+```{R}
+library(class)
+set.seed(22431)
+
+pred.knn <- knn(train = training.set[-1],
+                test = test.set[-1],
+                cl = training.set$diagnosis,
+                prob = TRUE,
+                k = 3)
+
+(conf.knn <- table(Truth = test.set$diagnosis,
+                  Pred = pred.rf))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.knn, 1))
+accuracy <- sum(diag(conf.knn)) / sum(conf.knn)
+
+# Results
+paste0('Accuracy: ', accuracy)
+paste0('Error: ', round(100 * (1 - accuracy), 4), '%')
+paste0('Harmonic mean: ', harm(props[1,1], props[2,2])) 
+```
+
+```{R}
+pred.knn.cv <- knn.cv(train = training.set[-1],
+                      cl = training.set$diagnosis,
+                      k = 3)
+
+(conf.knn <- table(Truth = training.set$diagnosis,
+                   Pred = pred.knn.cv))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.knn, 1))
+accuracy <- sum(diag(conf.knn)) / sum(conf.knn)
+
+# Results
+paste0('Accuracy: ', accuracy)
+paste0('Error: ', round(100 * (1 - accuracy), 4), '%')
+paste0('Harmonic mean: ', harm(props[1,1], props[2,2])) 
+```
+
+```{R}
+neighbours <- seq(1, sqrt(nrow(training.set)), 2)
+errors <- matrix(c(neighbours, rep(0, length(neighbours))),
+                 nrow = length(neighbours))
+colnames(errors) <- c('k', 'LOOCV error')
+
+errors2 <- lapply(X = neighbours, FUN = function(k) {
+  set.seed(22413)
+  pred.knn.cv <- knn.cv(train = training.set[-1],
+                        cl = training.set$diagnosis,
+                        k = k)
+  
+  conf.knn <- table(Truth = training.set$diagnosis,
+                   Pred = pred.knn.cv)
+  return(1 - sum(diag(conf.knn)) / sum(conf.knn))
+})
+
+errors[, 'LOOCV error'] <- unlist(errors2, recursive = TRUE)
+errors
+
+lowest.error<- as.integer(which.min(errors[, 'LOOCV error']))
+(k.best <- errors[lowest.error, 'k'])
+
+plot(errors, type = 'b')
+```
+
+```{R}
+set.seed(22413)
+pred.knn <- knn(train = training.set[-1],
+                test = test.set[-1],
+                cl = training.set$diagnosis,
+                prob = TRUE,
+                k = k.best)
+
+(conf.knn <- table(Truth = test.set$diagnosis,
+                  Pred = pred.rf))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.knn, 1))
+accuracy <- sum(diag(conf.knn)) / sum(conf.knn)
+
+# Results
+paste0('Accuracy: ', accuracy)
+paste0('Error: ', round(100 * (1 - accuracy), 4), '%')
+paste0('Harmonic mean: ', harm(props[1,1], props[2,2]))
+```
+
+# Logistic ----
+classifier.log <- glm(formula = diagnosis ~ .,
+                      family = binomial,
+                      data = training.set)
+
+prob.log <- predict(classifier.log,
+                    type = 'response',
+                    newdata = test.set[-1])
+pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
+
+# Logistic Confusion matrix and accuracy.
+(conf.log <- table(test.set[, 1], pred.log))
+(acc.log <- (conf.log[1, 1] + conf.log[2, 2]) / dim(test.set)[1])
+
+# Random Forest Classification ----
+
+```{R}
+library(randomForest)
+set.seed(22413)
+
+model.rf <- randomForest(formula = diagnosis ~ .,
+                         data = training.set,
+                         ntree = 100,
+                         proximity = FALSE)
+model.rf
+```
+
+We get an estimated test error (OOB) of 3.95%. Let's compute the real test error:
+
+```{R}
+harm <- function (a,b) { 2 / (1/a + 1/b) }
+
+pred.rf <- predict(model.rf,
+                   newdata = test.set,
+                   type = 'class')
+
+(conf.rf <- table(Truth = test.set$diagnosis,
+                  Pred = pred.rf))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.rf, 1))
+(accuracy <- sum(diag(conf.rf)) / sum(conf.rf))
+
+# Real test error
+round(100 * (1 - accuracy), 2)
+harm(props[1,1], props[2,2])
+```
+
+So OOB really works in estimating prediction error and the RF is better than a single tree
+
+However, there still is a big issue in unbalanced classes
+one way to deal with this is to include class weights
+
+```{R}
+set.seed(22413)
+model.rf <- randomForest(formula = diagnosis ~ .,
+                         data = training.set,
+                         ntree = 100,
+                         proximity = FALSE,
+                         classwt = c(10, 1))
+model.rf
+```
+
+helps a little bit, but not much: we get estimated test error (OOB) of 9.86% with a better balance; let's compute the real test error
+
+```{R}
+pred.rf2 <- predict (model.rf2, deposit[test.indexes,], type="class")
+
+(ct <- table(Truth=deposit$subscribed[test.indexes], Pred=pred.rf2))
+
+# percent by class
+prop.table(ct, 1)
+# total percent correct
+sum(diag(ct))/sum(ct)
+# real test error is 
+
+round(100*(1-sum(diag(ct))/sum(ct)),2)
+
+(F1 <- harm (prop.table(ct,1)[1,1], prop.table(ct,1)[2,2]))
+```
+
+Another way is to stratify the sampling in the boostrap resamples
+
+# 'yes' is the less represented class, so we upsample it
+
+```{R}
+n.b <- table(training.set$diagnosis)['B']
+n.m <- table(training.set$diagnosis)['M']
+
+set.seed(22413)
+model.rf <- randomForest(formula = diagnosis ~ .,
+                         data = training.set,
+                         ntree = 100,
+                         proximity = FALSE,
+                         strata = training.set$diagnosis,
+                         sampsize = c(n.b, n.m))
+model.rf
+```
+
+which seems to help much more: we get an estimated test error (OOB) of 17%, but with a better balance
+
+# let's compute the real test error:
+
+```{R}
+pred.rf <- predict(model.rf,
+                   newdata = test.set,
+                   type = 'class')
+
+(conf.rf <- table(Truth = test.set$diagnosis,
+                  Pred = pred.rf))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.rf, 1))
+(accuracy <- sum(diag(conf.rf)) / sum(conf.rf))
+
+# Real test error
+round(100 * (1 - accuracy), 2)
+harm(props[1,1], props[2,2])
+
+```
+
+Let's optimize the number of trees based on OOB error:
+
+```{R}
+(ntrees <- round(10^seq(1,3,by=0.2)))
+
+rf.results <- matrix(c(ntrees, rep(0, length(ntrees))),
+                     nrow = length(ntrees))
+colnames(rf.results) <- c('nTrees', 'OOB')
+
+OOBs <- lapply(X = ntrees, FUN = function(nt) {
+  set.seed(22413)
+  model.rf <- randomForest(formula = diagnosis ~ .,
+                           data = training.set,
+                           ntree = nt,
+                           proximity = FALSE, 
+                           # sampsize=c(yes=3000, no=3000),
+                           strata = training.set$diagnosis)
+  return(model.rf$err.rate[[nt, 1]])
+})
+
+rf.results[, 'OOB'] <- unlist(OOBs, recursive = TRUE)
+rf.results
+
+# Choose best value of 'nTrees'
+lowest.OOB.error<- as.integer(which.min(rf.results[, 'OOB']))
+(nt.best <- rf.results[lowest.OOB.error, 'nTrees'])
+```
+
+we could also try to optimize the number of variables in the same way but, as it was said in the lectures, the default value (square root) works fine in general
+
+Now refit the RF with the best value of 'ntrees'
+
+```{R}
+set.seed(22413)
+model.rf <- randomForest(formula = diagnosis ~ .,
+                         data = training.set,
+                         ntree = nt.best,
+                         proximity = FALSE,
+                         importance = TRUE,
+                         # sampsize=c(yes=3000, no=3000),
+                         strata = training.set$diagnosis)
+model.rf
+
+pred.rf <- predict(model.rf,
+                   newdata = test.set,
+                   type = 'class')
+
+(conf.rf <- table(Truth = test.set$diagnosis,
+                  Pred = pred.rf))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.rf, 1))
+(accuracy <- sum(diag(conf.rf)) / sum(conf.rf))
+
+# Real test error
+round(100 * (1 - accuracy), 2)
+harm(props[1,1], props[2,2])
+```
+
+
+
+```{R}
+# The importance of variables
+plot(model.rf)
+varImpPlot(model.rf, type = 1)
+vars <- importance(model.rf, type = 1)
+
+plot(model.rf, main = 'Error')
+
+legend('topright',
+       legend = c('OOB', 'B', 'M'),
+       pch = c(1, 1),
+       col = c('black', 'red', 'green'))
+
+# What variables are being used in the forest (their counts)
+vars <- cbind(vars, varUsed(model.rf, by.tree=FALSE,count = TRUE))
+colnames(vars) = c('Importance', 'Count')
+vars
+```
+
+# SVM ----
+classifier.svm.line <- train(form = diagnosis ~ .,
+                             data = training.set,
+                             method = 'svmLinear',
+                             trControl = trc,
+                             trace = FALSE)
+
+classifier.svm.poly <- train(form = diagnosis ~ .,
+                             data = training.set,
+                             method = 'svmPoly',
+                             trControl = trc,
+                             trace = FALSE)
+
+classifier.svm.gaus <- train(form = diagnosis ~ .,
+                             data = training.set,
+                             method = 'svmRadial',
+                             trControl = trc,
+                             trace = FALSE)
+
+pred.svm.line <- predict(classifier.svm.line,
+                         newdata = test.set)
+pred.svm.poly <- predict(classifier.svm.poly,
+                         newdata = test.set)
+pred.svm.gaus <- predict(classifier.svm.gaus,
+                         newdata = test.set)
+
+# Cost plots, SVM Confusion matrix and accuracy.
+plot(classifier.svm.poly)
+plot(classifier.svm.gaus)
+(conf.svm.line <- confusionMatrix(data = classifier.svm.line,
+                                  reference = test.set$diagnosis,
+                                  positive = 'M'))
+(conf.svm.poly <- confusionMatrix(data = classifier.svm.poly,
+                                  reference = test.set$diagnosis,
+                                  positive = 'M'))
+(conf.svm.gaus <- confusionMatrix(data = classifier.svm.gaus,
+                                  reference = test.set$diagnosis,
+                                  positive = 'M'))
+(acc.svm.line <- mean(pred.svm.line == test.set$diagnosis))
+(acc.svm.poly <- mean(pred.svm.poly == test.set$diagnosis))
+(acc.svm.gaus <- mean(pred.svm.gaus == test.set$diagnosis))
+
+# Naive Bayes ----
+```{R}
+library(e1071)
+
+set.seed(22413)
+model.nb <- naiveBayes(formula = diagnosis ~ .,
+                       data = training.set)
+model.nb
+
+predict(model.nb, newdata = test.set[-1])
+predict(model.nb, newdata = test.set[-1], type = 'raw')
+pred.nb <- predict(model.nb, newdata = training.set[-1])
+
+(conf.rf <- table(Truth = training.set$diagnosis,
+                  Pred = pred.nb))
+
+# Percent of each class and accuracy
+(props <- prop.table(conf.rf, 1))
+(accuracy <- sum(diag(conf.rf)) / sum(conf.rf))
+
+# Real test error
+round(100 * (1 - accuracy), 2)
+harm(props[1,1], props[2,2])
+```
+
+# Neural Networks ----
+library(nnet)
+classifier.nn <- nnet(formula = diagnosis ~ .,
+                      data = training.set,
+                      size = 10, maxit = 2000, decay = 0)
+
+pred.nn <- as.factor(predict(classifier.nn, newdata = test.set, type = 'class'))
+(conf.nn <- table(pred.nn, test.set$diagnosis))
+(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
+
+par(mfrow=c(3,2))
+for (i in 1:3)
+{
+  set.seed(42)
+  nn1 <- nnet(formula=diagnosis ~ ., data=training.set, size=i, decay=0, maxit=2000,trace=T)
+  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
+ 
+  pca.tr <- prcomp(training.set[, 2:31])
+  pca.tr.df <- as.data.frame(pca.tr$x)
+  plot(pca.tr.df$PC2 ~ pca.tr.df$PC1,pch=20,col=c('red','green')[pred.nn1])
+  title(main=paste(i,'hidden unit(s)'))
+  plot(pca.tr.df$PC2 ~ pca.tr.df$PC1, pch=20,col=c('red','green')[as.numeric(training.set$diagnosis)])
+  title(main='Real Diagnosis')
+}
+
+par(mfrow=c(3,2))
+for (i in 1:3)
+{
+  set.seed(42)
+  nn1 <- nnet(formula=diagnosis ~ ., data=training.set, size=i, decay=0, maxit=2000,trace=T)
+  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
+
+  fda.tr <- lfda(training.set[-1], training.set[1], r = 3, metric='plain')
+  fda.tr.df <- as.data.frame(fda.tr$Z)
+  plot(fda.tr.df$V3 ~ fda.tr.df$V1, pch=20,col=c('red','green')[pred.nn1])
+  title(main=paste(i,'hidden unit(s)'))
+  plot(fda.tr.df$V3 ~ fda.tr.df$V1, pch=20,col=c('red','green')[as.numeric(training.set$diagnosis)])
+  title(main='Real Diagnosis')
+}
+
+par(mfrow=c(1,1))
+
+# With 3 hidden units, que NN learns quite perfectly with normalized data
+
+# This method finds that best number of hidden units is 5 and decay weight value 0.1
+set.seed(42)
+nnet <- train(form = diagnosis ~ ., data=training.set, method = 'nnet', metric = 'Accuracy', maxit=2000,trace=T, linout = F)
+pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
+(conf.nnet <- table(pred.nnet, test.set$diagnosis))
+(acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
+
+#coef(nnet)
+train_control <- trainControl(method="LOOCV", number = 10)
+grid <- expand.grid(decay = 10^seq(-3, 0, 0.3),
+                    size = seq(1, 10))
+nnet <- train(form = diagnosis ~.,
+              data = training.set,
+              method = 'nnet', 
+              tuneGrid = grid, 
+              trControl = trc,
+              trace = FALSE)
+
+pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
+(conf.nn <- table(pred.nn, test.set$diagnosis))
+(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
+# 98.2% accuracy
+# Gradient Boosting ----
+tune.xgb <- expand.grid(
+  eta = c(0.01, 0.001, 0.0001),
+  nrounds = 500,
+  lambda = 1,
+  alpha = 0
+)
+
+classifier.xgb <- train(x = as.matrix(training.set[-1]),
+                        y = training.set$diagnosis,
+                        method = 'xgbLinear',
+                        trControl = trc,
+                        tuneGrid = tune.xgb)
+
+pred.xgb <- predict(classifier.xgb,
+                    newdata = test.set)
+
+# Cost plots, Confusion matrix and accuracy.
+(conf.xgb <- confusionMatrix(data = classifier.xgb,
+                             reference = test.set$diagnosis,
+                             positive = 'M'))
+(acc.xgb <- mean(pred.xgb == test.set$diagnosis))
+
+####################################################################
+# SECTION 3: Model Comparaison
+####################################################################
+
+classifiers <- list(
+  KNN = classifier.knn,
+  SVM = classifier.svm.poly,
+  RF = classifier.rf,
+  NN = nnet,
+  GB = classifier.xgb)
+
+models.corr <- modelCor(classifiers)
