@@ -130,17 +130,18 @@ harmMean <- function(elements) {
 }
 
 getAccuracyReport <- function(Truth, Pred) {
-  (conf <- table(Truth = Truth,
-                 Pred = Pred))
+  conf <- table(Truth = Truth,
+                Pred = Pred)
   
   # Percent of each class and accuracy
   props <- prop.table(conf, 1)
   accuracy <- sum(diag(conf)) / sum(conf)
 
   # Results
-  print(paste0('Accuracy: ', accuracy))
+  print(conf)
+  print(paste0('Accuracy: ', round(100 * accuracy, 4), '%'))
   print(paste0('Error: ', round(100 * (1 - accuracy), 4), '%'))
-  print(paste0('Harmonic mean: ', harmMean(diag(props))))
+  print(paste0('F1: ', round(100 * harmMean(diag(props)), 4), '%'))
 }
 ```
 
@@ -160,17 +161,22 @@ colnames(test.set.lda) <- c('diagnosis', 'LD1')
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = test.set.lda$diagnosis)
+
+pred.lda <- predict(lda, test.set, type = 'prob')
+colAUC(pred.lda, test.set$diagnosis, plotROC = TRUE)
 ```
 
-```{R LDA plots}                        
+```{R LDA plots}
 # Display diagnosis over 1D.
 ggplot(training.set.lda, aes(x = LD1, y = 0, col = diagnosis)) +
-  ggtitle('Diagnosis distribution over LD1 (training)') +
+  scale_color_manual(values = c('#00BFC4', '#F8766D')) +
+  ggtitle('Diagnosis distribution over LD1') +
   geom_point(alpha = 0.8)
 
 # Display diagnosis over 2D (Density).
 ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
-  ggtitle('Diagnosis density over first LD (training)') +
+  scale_fill_manual(values = c('#00BFC4', '#F8766D')) +
+  ggtitle('Diagnosis density over LD1') +
   geom_density(alpha = 0.8)
 ```
 
@@ -276,13 +282,34 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = ifelse(prob.log >= p.best, 'M', 'B'))
 ```
 
-```{R - Decision Trees}
+Let's try with a single decision tree and check the training error rate and the test results report.
 
+```{R - Random Forest: Single decision tree}
+library(tree)
+
+set.seed(22413)
+model.dt <- tree(formula = diagnosis ~ .,
+                 data = training.set)
+
+summary(model.dt)
+
+plot (model.dt)
+text (model.dt, pretty = 0)
+
+pred.dt <- predict(model.dt,
+                   newdata = test.set,
+                   type="class")
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.dt)
 ```
+
+We get a high-performance for being just a unique tree, but let's create an aggregation of them and see what happens.
 
 ```{R - Random Forest}
 library(randomForest)
 
+set.seed(22413)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
                          ntree = 25,
@@ -290,7 +317,7 @@ model.rf <- randomForest(formula = diagnosis ~ .,
 model.rf
 ```
 
-We get an estimated test error (OOB) of 3.95%. Let's compute the real test error:
+We get an estimated test error (OOB) of 5.17%. Let's compute the real test error:
 
 ```{R - Random Forest: test accuracy}
 pred.rf <- predict(model.rf,
@@ -301,47 +328,18 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.rf)
 ```
 
-So OOB really works in estimating prediction error and the RF is better than a single tree
-
-However, there still is a big issue in unbalanced classes one way to deal with this is to include class weights
-
-helps a little bit, but not much: we get estimated test error (OOB) of 9.86% with a better balance; let's compute the real test error
+So OOB really works in estimating prediction error and the RF is better than a single tree. However, there still is a big issue with unbalanced classes one way to deal with this is to include class weights which can help a little bit:
 
 ```{R - Random Forest: weight assign}
+numB <- summary(training.set$diagnosis)[['B']]
+numM <- summary(training.set$diagnosis)[['M']]
+
+set.seed(22413)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
-                         ntree = 100,
+                         ntree = 25,
                          proximity = FALSE,
-                         classwt = c(10, 1))
-model.rf
-
-pred.rf <- predict(model.rf,
-                   newdata = test.set,
-                   type="class")
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = pred.rf)
-```
-
-Another way is to stratify the sampling in the boostrap resamples
-
-# 'yes' is the less represented class, so we upsample it
-
-
-which seems to help much more: we get an estimated test error (OOB) of 17%, but with a better balance
-
-# let's compute the real test error:
-
-```{R}
-n.b <- table(training.set$diagnosis)['B']
-n.m <- table(training.set$diagnosis)['M']
-
-model.rf <- randomForest(formula = diagnosis ~ .,
-                         data = training.set,
-                         ntree = 15,
-                         proximity = FALSE,
-                         strata = training.set$diagnosis,
-                         sampsize = c(n.b, n.m))
+                         classwt = c(1, numB / numM))
 model.rf
 
 pred.rf <- predict(model.rf,
@@ -352,16 +350,38 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.rf)
 ```
 
-Let's optimize the number of trees based on OOB error:
+This fix doesn't even improve the accuracy or reduction of OOB error. Another way is to arrange the sampling in the boostrap and let's compute the real test error:
 
 ```{R}
-(ntrees <- round(10^seq(1, 3, by = 0.1)))
+set.seed(22413)
+model.rf <- randomForest(formula = diagnosis ~ .,
+                         data = training.set,
+                         ntree = 15,
+                         proximity = FALSE,
+                         strata = training.set$diagnosis,
+                         sampsize = c(B = min(numB, numM),
+                                      M = min(numB, numM)))
+model.rf
+
+pred.rf <- predict(model.rf,
+                   newdata = test.set,
+                   type = 'class')
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.rf)
+```
+
+Resamples which seems to help much more: we get an estimated test error (OOB) of 6.36%, but with a better balance. Let's optimize the number of trees based on OOB error:
+
+```{R - Random Forest: nTree optimization}
+(ntrees <- round(10^seq(1, 3, by = 0.05)))
 
 rf.results <- matrix(c(ntrees, rep(0, length(ntrees))),
                      nrow = length(ntrees))
 colnames(rf.results) <- c('nTrees', 'OOB')
 
-OOBs <- lapply(X = ntrees, FUN = function(nt) {
+OOBs <- sapply(X = ntrees, FUN = function(nt) {
+  set.seed(22413)
   model.rf <- randomForest(formula = diagnosis ~ .,
                            data = training.set,
                            ntree = nt,
@@ -371,7 +391,7 @@ OOBs <- lapply(X = ntrees, FUN = function(nt) {
   return(model.rf$err.rate[[nt, 1]])
 })
 
-rf.results[, 'OOB'] <- unlist(OOBs, recursive = TRUE)
+rf.results[, 'OOB'] <- OOBs
 rf.results
 
 # Choose best value of 'nTrees'
@@ -379,11 +399,9 @@ lowest.OOB.error<- as.integer(which.min(rf.results[, 'OOB']))
 (nt.best <- rf.results[lowest.OOB.error, 'nTrees'])
 ```
 
-we could also try to optimize the number of variables in the same way but, as it was said in the lectures, the default value (square root) works fine in general
+We could also try to optimize the number of variables in the same way but, as it was said in the lectures, the default value (square root) works fine in general. Now let's refit the RF with the best value of 'ntrees', check the statistics and the importance of the variables:
 
-Now refit the RF with the best value of 'ntrees'
-
-```{R}
+```{R - Random Forest: Best model}
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
                          ntree = nt.best,
@@ -399,10 +417,7 @@ pred.rf <- predict(model.rf,
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.rf)
-```
 
-```{R - }
-# The importance of variables
 plot(model.rf)
 varImpPlot(model.rf, type = 1)
 vars <- importance(model.rf, type = 1)
