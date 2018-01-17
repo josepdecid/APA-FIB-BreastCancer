@@ -632,22 +632,26 @@ pred.xgb <- predict(classifier.xgb,
 
 ```{R}
 classifiers <- list(
-  KNN = classifier.knn,
-  SVM = classifier.svm.poly,
-  RF = classifier.rf,
-  NN = nnet,
-  GB = classifier.xgb)
+  KNN = model.nn,
+  #SVM = classifier.svm.poly,
+  RF = model.rf
+  #NN = nnet,
+  #GB = classifier.xgb
+  )
 
 models.corr <- modelCor(classifiers)
 ```
 
 We plot ROC curves which represent False Positive rate against True Positives rate. This gives us an accuracy estimation of out model.
 ```{R}
+
+addplot = FALSE; i = 1;
 for (model in classifiers){
   pred = predict(model, newdata = test.set)
   roc_curve = roc(response = as.numeric(test.set$diagnosis), 
                   predictor = as.numeric(pred))
-  plot(roc_curve, add = TRUE)
+  plot(roc_curve, add = FALSE, col = i)
+  addplot = TRUE; i = i + 1;
 }
 legend(0.35, 0.45, c('knn', 'svm.poly', 'rf','nnet','xgb'), 2:6)
 
