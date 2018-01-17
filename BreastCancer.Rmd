@@ -177,15 +177,45 @@ colAUC(pred.lda, test.set$diagnosis, plotROC = TRUE)
 ```{R LDA plots}
 # Display diagnosis over 1D.
 ggplot(training.set.lda, aes(x = LD1, y = 0, col = diagnosis)) +
-  scale_color_manual(values = c('#00BFC4', '#F8766D')) +
   ggtitle('Diagnosis distribution over LD1') +
-  geom_point(alpha = 0.8)
+  geom_point(alpha = 0.8) + theme(legend.position="none")
 
 # Display diagnosis over 2D (Density).
 ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
-  scale_fill_manual(values = c('#00BFC4', '#F8766D')) +
   ggtitle('Diagnosis density over LD1') +
   geom_density(alpha = 0.8)
+```
+
+```{R Naive Bayes}
+library(e1071)
+
+set.seed(22413)
+model.nb <- naiveBayes(formula = diagnosis ~ .,
+                       data = training.set)
+model.nb
+
+# predict(model.nb, newdata = test.set[-1], type = 'raw')
+pred.nb <- predict(model.nb,
+                   newdata = test.set[-1])
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.nb)
+```
+
+Given the non-linearity independence among features, the classifier does not work that good, with only a 92'92% of accuracy. Let's apply it over a LDA reduced training set:
+
+```{R Naive Bayes: LDA}
+set.seed(22413)
+model.nb.lda <- naiveBayes(formula = diagnosis ~ .,
+                           data = training.set.lda)
+model.nb.lda
+
+# predict(model.nb, newdata = test.set[-1], type = 'raw')
+pred.nb.lda <- predict(model.nb.lda,
+                       newdata = test.set.lda[-1])
+
+getAccuracyReport(Truth = test.set.lda$diagnosis,
+                  Pred = pred.nb.lda)
 ```
 
 # K-NN ----
@@ -277,11 +307,11 @@ getAccuracyReport(Truth = test.set$diagnosis,
 ```
 
 ```{R - Logistic: Optimal P}
-p.possible <- seq(0.05, 0.95, by = 0.05)
+p.possible <- seq(0, 1, by = 0.01)
 
 classifier.log <- glm(formula = diagnosis ~ .,
-                        family = binomial,
-                        data = training.set)
+                      family = binomial,
+                      data = training.set)
 
 prob.log <- predict(classifier.log,
                     type = 'response',
@@ -294,12 +324,52 @@ errors <- sapply(X = p.possible, FUN = function(p) {
 })
 
 min(errors)
-props <- prop.table(conf.knn, 1)
 lowest.error <- as.integer(which.min(errors))
 (p.best <- p.possible[lowest.error])
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = ifelse(prob.log >= p.best, 'M', 'B'))
+
+ggplot(test.set) +
+  xlab('Observation') + ylab('Probability') +
+  geom_line(aes(x = seq(nrow(test.set)), y = 0.5), linetype = 'dotted') +
+  geom_line(aes(x = seq(nrow(test.set)), y = p.best), colour = 'purple') +
+  geom_point(aes(x = seq(nrow(test.set)), y = prob.log, col = diagnosis))
+```
+
+```{R - SVM}
+library(e1071)
+
+classifier.svm.linear <- svm(formula = diagnosis ~ .,
+                             data = training.set,
+                             type = 'C-classification',
+                             kernel = 'linear')
+classifier.svm.linear
+
+pred.svm.linear <- predict(classifier.svm.linear,
+                           newdata = test.set)
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.svm.linear)
+```
+
+Cross-Validation to optimize C parameter:
+
+```{R - SVM: C optimization}
+classifier.svm.linear.cv = tune.svm(x = diagnosis ~ .,
+                                    data = training.set,
+                                    cost = 10^seq(-8, 3),
+                                    type = 'C-classification',
+                                    kernel = 'linear',
+                                    tunecontrol = tune.control(cross = 10))
+
+classifier.svm.linear.cv
+
+pred.svm.linear.cv <- predict(classifier.svm.linear.cv$best.model,
+                              newdata = test.set)
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.svm.linear.cv)
 ```
 
 Let's try with a single decision tree and check the training error rate and the test results report.
@@ -456,23 +526,6 @@ colnames(vars) = c('Importance', 'Count')
 vars
 ```
 
-```{R - SVM}
-library(e1071)
-
-classifier.svm.linear <- svm(formula = diagnosis ~ .,
-                             data = training.set,
-                             type = 'C-classification',
-                             kernel = 'linear')
-classifier.svm.linear
-
-pred.svm.linear <- predict(classifier.svm.linear,
-                           newdata = test.set)
-
-(conf.svm.linear <- table(Truth = test.set$diagnosis,
-                          Pred = pred.svm.linear))
-(acc.svm.line <- mean(pred.svm.linear == test.set$diagnosis))
-```
-
 ```{R - SVM: Gaussian Kernel}
 classifier.svm.gaussian <- svm(formula = diagnosis ~ .,
                                data = training.set,
@@ -485,38 +538,6 @@ pred.svm.gaussian <- predict(classifier.svm.gaussian,
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.svm.gaussian)
-```
-
-```{R Naive Bayes}
-library(e1071)
-
-set.seed(22413)
-model.nb <- naiveBayes(formula = diagnosis ~ .,
-                       data = training.set)
-model.nb
-
-# predict(model.nb, newdata = test.set[-1], type = 'raw')
-pred.nb <- predict(model.nb,
-                   newdata = test.set[-1])
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = pred.nb)
-```
-
-Given the non-linearity independence among features, the classifier does not work that good, with only a 92'92% of accuracy. Let's apply it over a LDA reduced training set:
-
-```{R Naive Bayes: LDA}
-set.seed(22413)
-model.nb.lda <- naiveBayes(formula = diagnosis ~ .,
-                           data = training.set.lda)
-model.nb.lda
-
-# predict(model.nb, newdata = test.set[-1], type = 'raw')
-pred.nb.lda <- predict(model.nb.lda,
-                       newdata = test.set.lda[-1])
-
-getAccuracyReport(Truth = test.set.lda$diagnosis,
-                  Pred = pred.nb.lda)
 ```
 
 # Neural Networks ----
