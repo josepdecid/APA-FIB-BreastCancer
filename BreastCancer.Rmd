@@ -26,6 +26,10 @@ harmMean <- function(elements) {
   return(length(elements) / sum(1 / elements))
 }
 
+factorOrdered <- function(categories) {
+  return(factor(categories, levels(as.factor(categories))[c(2, 1)]))
+}
+
 getAccuracyReport <- function(Truth, Pred) {
   conf <- table(Truth = Truth,
                 Pred = Pred)
@@ -60,11 +64,11 @@ summary(dataset)
 
 Once checked that there are no NA or out of range values, we consider that it's not necessary to deal with missing or invalid data.
 We have to convert the dependant variable 'diagnosis' into factors (2 levels).
-The diagnosis distribution is very unbalanced, having 357 Benign and 212 Malign observations.
+The diagnosis distribution is a bit unbalanced, having 357 Benign and 212 Malign observations.
 As long as we have numeric variables that are shown in different scales, some methods must need to scale or center to work properly, like KNN, NN...
 
 ```{R Preprocessing}
-diagnosis <- factor(dataset$diagnosis, levels(dataset$diagnosis)[c(2, 1)])
+diagnosis <- factorOrdered(dataset$diagnosis)
 dataset$diagnosis <- diagnosis
 
 summary(dataset$diagnosis)
@@ -80,7 +84,7 @@ dataset[, -1] <- scale(dataset[, -1],
                        center = TRUE)
 ```
 
-Let's look at the variables to check some correlation, and try to remove some unnecessary predictors with high correlation among them.
+Let's look at the variables to check some correlation, and try to remove unnecessary predictors with high correlation among them.
 
 ```{R Correlation}
 library(corrplot)
@@ -105,35 +109,50 @@ dataset$radius_worst <- NULL
 dataset$area_worst <- NULL
 ```
 
-Once the dataset basic preprocessing is ready we proceed to split it into Training and Test set.
 We can explore how each features helps us to classify the data. 
 
 ```{R Separability of each variable}
 library(caret)
-scales <- list(x=list(relation="free"),y=list(relation="free"), cex=0.6)
-featurePlot(x=dataset[,-1], y=dataset$diagnosis, plot="density",scales=scales,
-            layout = c(6,4), auto.key = list(columns = 2), pch = "|")
+scales <- list(x = list(relation = 'free'),
+               y = list(relation = 'free'),
+               cex = 0.6)
+
+featurePlot(x = dataset[, -1],
+            y = dataset$diagnosis,
+            plot = 'density',
+            scales = scales,
+            layout = c(6,4),
+            col = c('#F8766D', '#00BFC4'),
+            auto.key = list(columns = 2),
+            pch = '|')
 ```
 
-Once the dataset basic preprocessing is ready we proceed to
-split it into Training and Test set.
+Once the dataset basic preprocessing is ready we proceed to split it into Training and Test set.
 
 ```{R Split dataset}
 library(caTools)
 
-set.seed(42)
+set.seed(10)
 split = sample.split(Y = dataset$diagnosis, SplitRatio = 0.8)
 
 training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
 ```
 
-Now let's apply feature extraction (PCA) because we can easily reduce dimensionality without losing so much information.
-With 10 components we get over 0.95 of variance explained. We would need 14, extra components only to obtain an extra 0.05, so we discard these ones.
+Now let's apply feature extraction (PCA) because we can easily reduce dimensionality without losing so much information. With 10 components we get over 0.95 of variance explained (16 for 0.99). We would need all the others only to explain an extra 1%, so those are discarded.
 
 ```{R PCA}
 pca <- prcomp(dataset[, -1])
-plot(pca, type = 'l')
+vars = apply(pca$x, 2, var)
+props <- vars / sum(vars)
+
+library(ggplot2)
+ggplot(mapping = aes(x = seq(1, length(props)), y = cumsum(props))) +
+  geom_bar(stat = "identity", fill = '#00BA38') +
+  geom_line(aes(x = seq(1, length(props)), y = 0.95), linetype = 'dotted') +
+  geom_line(aes(x = seq(1, length(props)), y = 0.99), linetype = 'dotted') +
+  xlab('Component') + ylab('Cummulate variance') +
+  ggtitle('Cummulate variance for PCA')
 
 summary(pca)
 
@@ -146,10 +165,9 @@ training.set.pca$diagnosis <- training.set$diagnosis
 test.set.pca <- subset(pca.df[, 1:16], split == FALSE)
 test.set.pca$diagnosis <- test.set$diagnosis
 
-library(ggplot2)
 ggplot(pca.df, mapping = aes(x = PC1, y = PC2, col = diagnosis)) +
-  scale_color_manual(values = c('#00BFC4', '#F8766D')) + geom_point() +
-  ggtitle('Diagnosis distribution over first two Principal Components')
+  ggtitle('Diagnosis distribution over first two Principal Components') +
+  geom_point()
 ```
 
 ####################################################################
@@ -161,49 +179,29 @@ Let's start looking for a logistic regression model for classification into bino
 ```{R - Logistic}
 model.log <- glm(formula = diagnosis ~ .,
                  family = binomial,
-                 data = training.set)
+                 data = training.set,
+                 trace = FALSE)
 
+# Simplify it using the AIC
 model.log.aic <- step(model.log)
 
-prob.log <- predict(model.log,
-                    type = 'response',
-                    newdata = test.set[-1])
-pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = pred.log)
-```
-
-```{R - Logistic: Optimal P}
-p.possible <- seq(0, 1, by = 0.01)
-
-model.log <- glm(formula = diagnosis ~ .,
-                 family = binomial,
-                 data = training.set)
-
-prob.log <- predict(model.log,
+prob.log <- predict(model.log.aic,
                     type = 'response',
                     newdata = test.set[-1])
 
-errors <- sapply(X = p.possible, FUN = function(p) {
-  prob <- as.factor(ifelse(prob.log >= p, 'M', 'B'))
-  conf <- table(test.set$diagnosis, prob)
-  return(1 - sum(diag(conf)) / sum(conf))
-})
-
-min(errors)
-lowest.error <- as.integer(which.min(errors))
-(p.best <- p.possible[lowest.error])
+pred.log <- ifelse(prob.log > 0.5, 'B', 'M')
 
 getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = ifelse(prob.log >= p.best, 'M', 'B'))
+                  Pred = factorOrdered(pred.log))
 
 ggplot(test.set) +
   xlab('Observation') + ylab('Probability') +
-  geom_line(aes(x = seq(nrow(test.set)), y = 0.5), linetype = 'dotted') +
-  geom_line(aes(x = seq(nrow(test.set)), y = p.best), colour = 'purple') +
+  ggtitle('Class probability for each observation') +
+  geom_line(aes(x = seq(nrow(test.set)), y = 0.5), col = 'purple') +
   geom_point(aes(x = seq(nrow(test.set)), y = prob.log, col = diagnosis))
 ```
+
+As probabilities of M and B are almost 1 or 0 there is no way to improve the P selection, so we choose the middle separator (0.5).
 
 ```{R LDA model}
 library(MASS)
