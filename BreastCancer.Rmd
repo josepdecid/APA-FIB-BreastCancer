@@ -43,7 +43,7 @@ The diagnosis distribution is very unbalanced, having 357 Benign and 212 Malign 
 As long as we have numeric variables that are shown in different scales, some methods must need to scale or center to work properly, like KNN, NN...
 
 ```{R Preprocessing}
-diagnosis <- as.factor(dataset$diagnosis)
+diagnosis <- factor(dataset$diagnosis, levels(dataset$diagnosis)[c(2, 1)])
 dataset$diagnosis <- diagnosis
 
 summary(dataset$diagnosis)
@@ -98,6 +98,7 @@ split it into Training and Test set.
 
 ```{R Split dataset}
 library(caTools)
+set.seed(22413)
 split = sample.split(Y = dataset$diagnosis, SplitRatio = 0.8)
 training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
@@ -114,9 +115,16 @@ summary(pca)
 
 pca.df <- as.data.frame(pca$x)
 
+# Create PCA for training set.
+training.set.pca <- subset(pca.df[, 1:16], split == TRUE)
+training.set.pca$diagnosis <- training.set$diagnosis
+# Create PCA for test set.
+test.set.pca <- subset(pca.df[, 1:16], split == FALSE)
+test.set.pca$diagnosis <- test.set$diagnosis
+
 library(ggplot2)
-ggplot(pca.df) +
-  geom_point(aes(x = PC1, y = PC2, col = diagnosis)) +
+ggplot(pca.df, mapping = aes(x = PC1, y = PC2, col = diagnosis)) +
+  scale_color_manual(values = c('#00BFC4', '#F8766D')) + geom_point() +
   ggtitle('Diagnosis distribution over first two Principal Components')
 ```
 
@@ -181,6 +189,9 @@ ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
 ```
 
 # K-NN ----
+
+Fit a K-NN model with an arbitrary K.
+
 ```{R - KNN}
 library(class)
 
@@ -194,6 +205,8 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.knn)
 ```
 
+Validate with Cross-Validation.
+
 ```{R KNN-CV}
 pred.knn.cv <- knn.cv(train = training.set[-1],
                       cl = training.set$diagnosis,
@@ -203,7 +216,7 @@ getAccuracyReport(Truth = training.set$diagnosis,
                   Pred = pred.knn.cv)
 ```
 
-As we have 456 observations in our training set, we might try odd k, roughly equal to the square root of 456. With two-category outcome, use an odd number eliminates tie vote chances.
+As long as we have 456 observations in our training set, we might try odd k, roughly equal to the square root of 456. With two-category outcome, use an odd number eliminates tie vote chances.
 
 ```{R - KNN: Find optimal k}
 neighbours <- seq(1, sqrt(nrow(training.set)), 2)
@@ -226,7 +239,10 @@ errors
 lowest.error<- as.integer(which.min(errors[, 'LOOCV error']))
 (k.best <- errors[lowest.error, 'k'])
 
-plot(errors, type = 'b')
+ggplot(mapping = aes(x = neighbours, y = errors[, 2])) +
+  geom_point(col = '#00BFC4') + geom_line(col = '#00BFC4') +
+  ggtitle('Optimization of K for K-NN') +
+  xlab('K') + ylab('LOOCV error')
 ```
 
 ```{R - KNN: Optimal k}
@@ -238,6 +254,10 @@ pred.knn <- knn(train = training.set[-1],
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.knn)
+
+library(pROC)
+roc_knn <- roc(test.set$diagnosis, as.numeric(pred.knn == 'M'))
+plot(roc_knn)
 ```
 
 ```{R - Logistic}
@@ -453,22 +473,7 @@ pred.svm.linear <- predict(classifier.svm.linear,
 (acc.svm.line <- mean(pred.svm.linear == test.set$diagnosis))
 ```
 
-```{R - SVM: Polynomial}
-classifier.svm.polynomial <- svm(formula = diagnosis ~ .,
-                                 data = training.set,
-                                 type = 'C-classification',
-                                 kernel = 'polynomial')
-classifier.svm.polynomial
-
-pred.svm.polynomial <- predict(classifier.svm.polynomial,
-                               newdata = test.set)
-
-(conf.svm.polynomial <- table(Truth = test.set$diagnosis,
-                              Pred = pred.svm.polynomial))
-(acc.svm.polynomial <- mean(pred.svm.polynomial == test.set$diagnosis))
-```
-
-```{R - SVM: Gaussian}
+```{R - SVM: Gaussian Kernel}
 classifier.svm.gaussian <- svm(formula = diagnosis ~ .,
                                data = training.set,
                                type = 'C-classification',
@@ -478,28 +483,8 @@ classifier.svm.gaussian
 pred.svm.gaussian <- predict(classifier.svm.gaussian,
                              newdata = test.set)
 
-(conf.svm.gaussian <- table(Truth = test.set$diagnosis,
-                            Pred = pred.svm.gaussian))
-(acc.svm.gaussian <- mean(pred.svm.linear == test.set$diagnosis))
-```
-
-```{R - SVM: Sigmoid}
-classifier.svm.sigmoid <- svm(formula = diagnosis ~ .,
-                              data = training.set,
-                              type = 'C-classification',
-                              kernel = 'sigmoid')
-classifier.svm.sigmoid
-
-pred.svm.sigmoid <- predict(classifier.svm.sigmoid,
-                            newdata = test.set)
-
-(conf.svm.linear <- table(Truth = test.set$diagnosis,
-                          Pred = pred.svm.sigmoid))
-(acc.svm.line <- mean(pred.svm.sigmoid == test.set$diagnosis))
-```
-
-```{R - SVM: Best kernel}
-
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.svm.gaussian)
 ```
 
 ```{R Naive Bayes}
@@ -510,20 +495,28 @@ model.nb <- naiveBayes(formula = diagnosis ~ .,
                        data = training.set)
 model.nb
 
-predict(model.nb, newdata = test.set[-1])
-predict(model.nb, newdata = test.set[-1], type = 'raw')
-pred.nb <- predict(model.nb, newdata = training.set[-1])
+# predict(model.nb, newdata = test.set[-1], type = 'raw')
+pred.nb <- predict(model.nb,
+                   newdata = test.set[-1])
 
-(conf.rf <- table(Truth = training.set$diagnosis,
-                  Pred = pred.nb))
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.nb)
+```
 
-# Percent of each class and accuracy
-(props <- prop.table(conf.rf, 1))
-(accuracy <- sum(diag(conf.rf)) / sum(conf.rf))
+Given the non-linearity independence among features, the classifier does not work that good, with only a 92'92% of accuracy. Let's apply it over a LDA reduced training set:
 
-# Real test error
-round(100 * (1 - accuracy), 2)
-harm(props[1,1], props[2,2])
+```{R Naive Bayes: LDA}
+set.seed(22413)
+model.nb.lda <- naiveBayes(formula = diagnosis ~ .,
+                           data = training.set.lda)
+model.nb.lda
+
+# predict(model.nb, newdata = test.set[-1], type = 'raw')
+pred.nb.lda <- predict(model.nb.lda,
+                       newdata = test.set.lda[-1])
+
+getAccuracyReport(Truth = test.set.lda$diagnosis,
+                  Pred = pred.nb.lda)
 ```
 
 # Neural Networks ----
