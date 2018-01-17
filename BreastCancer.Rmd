@@ -566,8 +566,8 @@ coef(nnet)
 ```
 
 ```{R}
-train_control <- trainControl(method="LOOCV", number = 10)
-grid <- expand.grid(decay = 10^seq(-3, 0, 0.3),
+train_control <- trainControl(method="cv", number = 10)
+grid <- expand.grid(decay = 10^seq(-3, 0, 0.5),
                     size = seq(1, 10))
 set.seed(22413)
 nnet <- train(form = diagnosis ~.,
@@ -578,9 +578,11 @@ nnet <- train(form = diagnosis ~.,
               trace = FALSE)
 
 nnet
+
 pred.nn <- as.factor(predict(nnet, type = 'raw'))
-(conf.nn <- table(pred.nn, training.set$diagnosis))
-(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(training.set)[1])
+
+getAccuracyReport(Truth = training.set$diagnosis,
+                  Pred = pred.nn)
 # 98.2% accuracy
 ```
 Now we test the optimal neural net with test set
