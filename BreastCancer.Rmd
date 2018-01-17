@@ -402,6 +402,7 @@ lowest.OOB.error<- as.integer(which.min(rf.results[, 'OOB']))
 We could also try to optimize the number of variables in the same way but, as it was said in the lectures, the default value (square root) works fine in general. Now let's refit the RF with the best value of 'ntrees', check the statistics and the importance of the variables:
 
 ```{R - Random Forest: Best model}
+set.seed(22413)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
                          ntree = nt.best,
@@ -526,72 +527,67 @@ harm(props[1,1], props[2,2])
 ```
 
 # Neural Networks ----
-```{R}
+Let's try a neural net with 10 neurons inside the hidden layer.
+```{R Neural Networks}
 library(nnet)
-classifier.nn <- nnet(formula = diagnosis ~ .,
+set.seed(22413)
+model.nn <- nnet(formula = diagnosis ~ .,
                       data = training.set,
                       size = 10, maxit = 2000, decay = 0)
+pred.nn <- as.factor(predict(classifier.nn, type = 'class'))
+
+getAccuracyReport(Truth = training.set$diagnosis,
+                  Pred = pred.nn)
+```
+
+Predicted error from training is 0% in our case so let's try to get test error directly in order to make improvements on our neural net.
+```{R}
 
 pred.nn <- as.factor(predict(classifier.nn, newdata = test.set, type = 'class'))
-(conf.nn <- table(pred.nn, test.set$diagnosis))
-(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
 
-par(mfrow=c(3,2))
-for (i in 1:3)
-{
-  set.seed(42)
-  nn1 <- nnet(formula=diagnosis ~ ., data=training.set, size=i, decay=0, maxit=2000,trace=T)
-  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
- 
-  pca.tr <- prcomp(training.set[, 2:31])
-  pca.tr.df <- as.data.frame(pca.tr$x)
-  plot(pca.tr.df$PC2 ~ pca.tr.df$PC1,pch=20,col=c('red','green')[pred.nn1])
-  title(main=paste(i,'hidden unit(s)'))
-  plot(pca.tr.df$PC2 ~ pca.tr.df$PC1, pch=20,col=c('red','green')[as.numeric(training.set$diagnosis)])
-  title(main='Real Diagnosis')
-}
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.nn)
+```
 
-par(mfrow=c(3,2))
-for (i in 1:3)
-{
-  set.seed(42)
-  nn1 <- nnet(formula=diagnosis ~ ., data=training.set, size=i, decay=0, maxit=2000,trace=T)
-  pred.nn1 <- as.numeric(as.factor(predict(nn1, type='class')))
-
-  fda.tr <- lfda(training.set[-1], training.set[1], r = 3, metric='plain')
-  fda.tr.df <- as.data.frame(fda.tr$Z)
-  plot(fda.tr.df$V3 ~ fda.tr.df$V1, pch=20,col=c('red','green')[pred.nn1])
-  title(main=paste(i,'hidden unit(s)'))
-  plot(fda.tr.df$V3 ~ fda.tr.df$V1, pch=20,col=c('red','green')[as.numeric(training.set$diagnosis)])
-  title(main='Real Diagnosis')
-}
-
-par(mfrow=c(1,1))
-
-# With 3 hidden units, que NN learns quite perfectly with normalized data
-
-# This method finds that best number of hidden units is 5 and decay weight value 0.1
-set.seed(42)
-nnet <- train(form = diagnosis ~ ., data=training.set, method = 'nnet', metric = 'Accuracy', maxit=2000,trace=T, linout = F)
+Now let's train for different size and decay values to find the best nnet, using cross-validation
+# This method finds that best number of hidden units is 6 and decay weight value 0.03162278
+This takes some minutes to compute!
+```{R}
+set.seed(22413)
+nnet <- train(form = diagnosis ~ ., data=training.set, method = 'nnet', metric = 'Accuracy', maxit=2000,trace=T, linout = F, trace = F)
 pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
 (conf.nnet <- table(pred.nnet, test.set$diagnosis))
 (acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
 coef(nnet)
 ```
+
+```{R}
 train_control <- trainControl(method="LOOCV", number = 10)
 grid <- expand.grid(decay = 10^seq(-3, 0, 0.3),
                     size = seq(1, 10))
+set.seed(22413)
 nnet <- train(form = diagnosis ~.,
               data = training.set,
               method = 'nnet', 
               tuneGrid = grid, 
-              trControl = trc,
+              trControl = train_control,
               trace = FALSE)
 
-pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
-(conf.nn <- table(pred.nn, test.set$diagnosis))
-(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(test.set)[1])
+nnet
+pred.nn <- as.factor(predict(nnet, type = 'raw'))
+(conf.nn <- table(pred.nn, training.set$diagnosis))
+(acc.nn <- (conf.nn[1, 1] + conf.nn[2, 2]) / dim(training.set)[1])
 # 98.2% accuracy
+```
+Now we test the optimal neural net with test set
+```{R}
+pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.nn)
+
+```
+
 # Gradient Boosting ----
 tune.xgb <- expand.grid(
   eta = c(0.01, 0.001, 0.0001),
