@@ -159,13 +159,13 @@ ggplot(pca.df, mapping = aes(x = PC1, y = PC2, col = diagnosis)) +
 Let's start looking for a logistic regression model for classification into binomial data. We start setting an arbitrary centered threshold at 0.5.
 
 ```{R - Logistic}
-classifier.log <- glm(formula = diagnosis ~ .,
-                      family = binomial,
-                      data = training.set)
+model.log <- glm(formula = diagnosis ~ .,
+                 family = binomial,
+                 data = training.set)
 
-classifier.log.aic <- step(classifier.log)
+model.log.aic <- step(model.log)
 
-prob.log <- predict(classifier.log,
+prob.log <- predict(model.log,
                     type = 'response',
                     newdata = test.set[-1])
 pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
@@ -177,11 +177,11 @@ getAccuracyReport(Truth = test.set$diagnosis,
 ```{R - Logistic: Optimal P}
 p.possible <- seq(0, 1, by = 0.01)
 
-classifier.log <- glm(formula = diagnosis ~ .,
-                      family = binomial,
-                      data = training.set)
+model.log <- glm(formula = diagnosis ~ .,
+                 family = binomial,
+                 data = training.set)
 
-prob.log <- predict(classifier.log,
+prob.log <- predict(model.log,
                     type = 'response',
                     newdata = test.set[-1])
 
@@ -341,13 +341,13 @@ plot(roc_knn, xlim = c(1.0,0.0))
 ```{R - SVM}
 library(e1071)
 
-classifier.svm.linear <- svm(formula = diagnosis ~ .,
-                             data = training.set,
-                             type = 'C-classification',
-                             kernel = 'linear')
-classifier.svm.linear
+model.svm.linear <- svm(formula = diagnosis ~ .,
+                        data = training.set,
+                        type = 'C-classification',
+                        kernel = 'linear')
+model.svm.linear
 
-pred.svm.linear <- predict(classifier.svm.linear,
+pred.svm.linear <- predict(model.svm.linear,
                            newdata = test.set)
 
 getAccuracyReport(Truth = test.set$diagnosis,
@@ -357,16 +357,16 @@ getAccuracyReport(Truth = test.set$diagnosis,
 Cross-Validation to optimize C parameter:
 
 ```{R - SVM: C optimization}
-classifier.svm.linear.cv = tune.svm(x = diagnosis ~ .,
-                                    data = training.set,
-                                    cost = 10^seq(-8, 3),
-                                    type = 'C-classification',
-                                    kernel = 'linear',
-                                    tunecontrol = tune.control(cross = 10))
+model.svm.linear.cv = tune.svm(x = diagnosis ~ .,
+                               data = training.set,
+                               cost = 10^seq(-8, 3),
+                               type = 'C-classification',
+                               kernel = 'linear',
+                               tunecontrol = tune.control(cross = 10))
 
 classifier.svm.linear.cv
 
-pred.svm.linear.cv <- predict(classifier.svm.linear.cv$best.model,
+pred.svm.linear.cv <- predict(model.svm.linear.cv$best.model,
                               newdata = test.set)
 
 getAccuracyReport(Truth = test.set$diagnosis,
@@ -557,20 +557,12 @@ getAccuracyReport(Truth = test.set$diagnosis,
 Now let's train for different size and decay values to find the best nnet, using cross-validation
 # This method finds that best number of hidden units is 6 and decay weight value 0.03162278
 This takes some minutes to compute!
-```{R}
-set.seed(22413)
-nnet <- train(form = diagnosis ~ ., data=training.set, method = 'nnet', metric = 'Accuracy', maxit=2000,trace=T, linout = F, trace = F)
-pred.nnet <- as.numeric(as.factor(predict(nnet, newdata = test.set)))
-(conf.nnet <- table(pred.nnet, test.set$diagnosis))
-(acc.nnet <- (conf.nnet[1, 1] + conf.nnet[2, 2]) / dim(test.set)[1])
-coef(nnet)
-```
 
 ```{R}
-train_control <- trainControl(method="cv", number = 10)
-grid <- expand.grid(decay = 10^seq(-3, 0, 0.5),
+train_control <- trainControl(method = 'cv', number = 10)
+grid <- expand.grid(decay = 10^seq(-3, 0, 0.1),
                     size = seq(1, 10))
-set.seed(22413)
+set.seed(42)
 nnet <- train(form = diagnosis ~.,
               data = training.set,
               method = 'nnet', 
@@ -581,7 +573,6 @@ nnet <- train(form = diagnosis ~.,
 nnet
 
 pred.nn <- as.factor(predict(nnet, type = 'raw'))
-
 getAccuracyReport(Truth = training.set$diagnosis,
                   Pred = pred.nn)
 # 98.2% accuracy
@@ -596,13 +587,13 @@ getAccuracyReport(Truth = test.set$diagnosis,
 ```
 
 ```{R - SVM: Gaussian Kernel}
-classifier.svm.gaussian <- svm(formula = diagnosis ~ .,
-                               data = training.set,
-                               type = 'C-classification',
-                               kernel = 'radial')
-classifier.svm.gaussian
+model.svm.gaussian <- svm(formula = diagnosis ~ .,
+                          data = training.set,
+                          type = 'C-classification',
+                          kernel = 'radial')
+model.svm.gaussian
 
-pred.svm.gaussian <- predict(classifier.svm.gaussian,
+pred.svm.gaussian <- predict(model.svm.gaussian,
                              newdata = test.set)
 
 getAccuracyReport(Truth = test.set$diagnosis,
@@ -610,18 +601,18 @@ getAccuracyReport(Truth = test.set$diagnosis,
 ```
 
 ```{R - SVM: C & Gamma optimization}
-classifier.svm.gaussian.cv = tune.svm(x = diagnosis ~ .,
-                                      data = training.set,
-                                      cost = 10^seq(-8, 3),
-                                      gamma = 2^seq(-3, 4),
-                                      type = 'C-classification',
-                                      kernel = 'radial',
-                                      tunecontrol = tune.control(cross = 12))
+model.svm.gaussian.cv = tune.svm(x = diagnosis ~ .,
+                                 data = training.set,
+                                 cost = 10^seq(-8, 3),
+                                 gamma = 2^seq(-3, 4),
+                                 type = 'C-classification',
+                                 kernel = 'radial',
+                                 tunecontrol = tune.control(cross = 12))
 
-classifier.svm.gaussian.cv
+model.svm.gaussian.cv
 
-pred.svm.gaussian.cv <- predict(classifier.svm.gaussian.cv$best.model,
-                              newdata = test.set)
+pred.svm.gaussian.cv <- predict(model.svm.gaussian.cv$best.model,
+                                newdata = test.set)
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.svm.gaussian.cv)
@@ -657,27 +648,36 @@ pred.xgb <- predict(classifier.xgb,
 
 ```{R}
 classifiers <- list(
-  KNN = model.nn,
-  #SVM = classifier.svm.poly,
-  RF = model.rf
-  #NN = nnet,
-  #GB = classifier.xgb
-  )
-
-models.corr <- modelCor(classifiers)
+  LOG = model.log,
+  NB = model.nb.lda,
+  SVML = model.svm.linear.cv$best.model,
+  RF = model.rf,
+  NN = model.nn,
+  SVMG = model.svm.gaussian.cv$best.model
+)
 ```
 
 We plot ROC curves which represent False Positive rate against True Positives rate. This gives us an accuracy estimation of out model.
 ```{R}
+ggplot(roc.data) +
+  geom_roc()
 
-addplot = FALSE; i = 1;
-for (model in classifiers){
-  pred = predict(model, newdata = test.set)
-  roc_curve = roc(response = as.numeric(test.set$diagnosis), 
-                  predictor = as.numeric(pred))
-  plot(roc_curve, add = FALSE, col = i)
-  addplot = TRUE; i = i + 1;
-}
-legend(0.35, 0.45, c('knn', 'svm.poly', 'rf','nnet','xgb'), 2:6)
+multiplot(p1, p2, p3, p4, cols=2)
+plots <- apply(classifiers, FUN = function(model) {
+  pred = predict(model,
+                 newdata = test.set)
+  
+  D.ex <- rbinom(50, 1, .5)
+  roc.data <- data.frame(
+    D = c(D.ex, D.ex), 
+    M = c(rnorm(50, mean = D.ex, sd = .4), rnorm(50, mean = D.ex, sd = 1)), 
+    Z = c(rep("A", 50), rep("B", 50))
+  )
+    
+  plot <- ggplot(roc.data, aes(m = M, d = D)) + geom_roc()
+  return(plot)
+})
+
+par(mfrow = c(4,2))
 
 ```
