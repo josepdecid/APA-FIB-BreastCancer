@@ -203,6 +203,8 @@ ggplot(test.set) +
 
 As probabilities of M and B are almost 1 or 0 there is no way to improve the P selection, so we choose the middle separator (0.5).
 
+Let's check data separability with LDA:
+
 ```{R LDA model}
 library(MASS)
 lda <- lda(formula = diagnosis ~ .,
@@ -235,6 +237,8 @@ ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
   geom_density(alpha = 0.8)
 ```
 
+Let's apply a basic Naive Bayes: 
+
 ```{R Naive Bayes}
 library(e1071)
 
@@ -250,10 +254,9 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.nb)
 ```
 
-Given the non-linearity independence among features, the classifier does not work that good, with only a 92'92% of accuracy. Let's apply it over a LDA reduced training set:
+Given the non-linearity independence among features, the classifier does not work as good as it could do, with only a 95'57% of accuracy. Let's apply it over a LDA reduced training set:
 
 ```{R Naive Bayes: LDA}
-set.seed(22413)
 model.nb.lda <- naiveBayes(formula = diagnosis ~ .,
                            data = training.set.lda)
 model.nb.lda
@@ -266,6 +269,8 @@ getAccuracyReport(Truth = test.set.lda$diagnosis,
                   Pred = pred.nb.lda)
 ```
 
+It is quite perfect! And we also got no false negative errors.
+
 Fit a K-NN model with an arbitrary K.
 
 ```{R - KNN}
@@ -275,7 +280,7 @@ pred.knn <- knn(train = training.set[-1],
                 test = test.set[-1],
                 cl = training.set$diagnosis,
                 prob = TRUE,
-                k = 3)
+                k = 5)
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.knn)
@@ -286,7 +291,7 @@ Validate with Cross-Validation.
 ```{R KNN-CV}
 pred.knn.cv <- knn.cv(train = training.set[-1],
                       cl = training.set$diagnosis,
-                      k = 3)
+                      k = 5)
 
 getAccuracyReport(Truth = training.set$diagnosis,
                   Pred = pred.knn.cv)
@@ -360,15 +365,33 @@ model.svm.linear.cv = tune.svm(x = diagnosis ~ .,
                                cost = 10^seq(-8, 3),
                                type = 'C-classification',
                                kernel = 'linear',
-                               tunecontrol = tune.control(cross = 10))
+                               tunecontrol = tune.control(cross = 12))
 
-classifier.svm.linear.cv
+model.svm.linear.cv
 
 pred.svm.linear.cv <- predict(model.svm.linear.cv$best.model,
                               newdata = test.set)
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.svm.linear.cv)
+```
+
+We obtain a higher accuracy, but all errors are false negatives. Let's try to modify each class error weight:
+
+```{R - SVM: Class weights}
+model.svm.linear <- svm(formula = diagnosis ~ .,
+                        data = training.set,
+                        cost = model.svm.linear.cv$best.parameters$cost,
+                        class.weights = c(M = 5, B = 0.0000000001),
+                        type = 'C-classification',
+                        kernel = 'linear')
+model.svm.linear
+
+pred.svm.linear <- predict(model.svm.linear,
+                           newdata = test.set)
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.svm.linear)
 ```
 
 ####################################################################
@@ -380,7 +403,6 @@ Let's try with a single decision tree and check the training error rate and the 
 ```{R - Random Forest: Single decision tree}
 library(tree)
 
-set.seed(22413)
 model.dt <- tree(formula = diagnosis ~ .,
                  data = training.set)
 
@@ -402,7 +424,7 @@ We get a high-performance for being just a unique tree, but let's create an aggr
 ```{R - Random Forest}
 library(randomForest)
 
-set.seed(22413)
+set.seed(10)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
                          ntree = 25,
@@ -424,15 +446,12 @@ getAccuracyReport(Truth = test.set$diagnosis,
 So OOB really works in estimating prediction error and the RF is better than a single tree. However, there still is a big issue with unbalanced classes one way to deal with this is to include class weights which can help a little bit:
 
 ```{R - Random Forest: weight assign}
-numB <- summary(training.set$diagnosis)[['B']]
-numM <- summary(training.set$diagnosis)[['M']]
-
-set.seed(22413)
+set.seed(10)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
                          ntree = 25,
                          proximity = FALSE,
-                         classwt = c(1, numB / numM))
+                         classwt = c(5, 1))
 model.rf
 
 pred.rf <- predict(model.rf,
@@ -446,10 +465,13 @@ getAccuracyReport(Truth = test.set$diagnosis,
 This fix doesn't even improve the accuracy or reduction of OOB error. Another way is to arrange the sampling in the boostrap and let's compute the real test error:
 
 ```{R}
-set.seed(22413)
+numB <- summary(training.set$diagnosis)[['B']]
+numM <- summary(training.set$diagnosis)[['M']]
+
+set.seed(10)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
-                         ntree = 15,
+                         ntree = 25,
                          proximity = FALSE,
                          strata = training.set$diagnosis,
                          sampsize = c(B = min(numB, numM),
@@ -464,7 +486,7 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.rf)
 ```
 
-Resamples which seems to help much more: we get an estimated test error (OOB) of 6.36%, but with a better balance. Let's optimize the number of trees based on OOB error:
+Resamples which seems to help much more: we get an estimated test error (OOB) of 4.39%, but with a better balance. Let's optimize the number of trees based on OOB error:
 
 ```{R - Random Forest: nTree optimization}
 (ntrees <- round(10^seq(1, 3, by = 0.05)))
@@ -474,13 +496,14 @@ rf.results <- matrix(c(ntrees, rep(0, length(ntrees))),
 colnames(rf.results) <- c('nTrees', 'OOB')
 
 OOBs <- sapply(X = ntrees, FUN = function(nt) {
-  set.seed(22413)
+  set.seed(10)
   model.rf <- randomForest(formula = diagnosis ~ .,
                            data = training.set,
                            ntree = nt,
-                           proximity = FALSE, 
-                           # sampsize=c(yes=3000, no=3000),
-                           strata = training.set$diagnosis)
+                           proximity = FALSE,
+                           strata = training.set$diagnosis,
+                           sampsize = c(B = min(numB, numM),
+                                        M = min(numB, numM)))
   return(model.rf$err.rate[[nt, 1]])
 })
 
@@ -495,22 +518,20 @@ lowest.OOB.error<- as.integer(which.min(rf.results[, 'OOB']))
 We could also try to optimize the number of variables in the same way but, as it was said in the lectures, the default value (square root) works fine in general. Now let's refit the RF with the best value of 'ntrees', check the statistics and the importance of the variables:
 
 ```{R - Random Forest: Best model}
-set.seed(22413)
+set.seed(10)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
                          ntree = nt.best,
                          proximity = FALSE,
                          importance = TRUE,
-                         # sampsize=c(yes=3000, no=3000),
-                         strata = training.set$diagnosis)
+                         strata = training.set$diagnosis,
+                         sampsize = c(B = min(numB, numM),
+                                      M = min(numB, numM)))
 model.rf
 
 pred.rf <- predict(model.rf,
                    newdata = test.set,
                    type = 'class')
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = pred.rf)
 
 plot(model.rf)
 varImpPlot(model.rf, type = 1)
@@ -527,6 +548,9 @@ legend('topright',
 vars <- cbind(vars, varUsed(model.rf, by.tree=FALSE,count = TRUE))
 colnames(vars) = c('Importance', 'Count')
 vars
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.rf)
 ```
 
 # Neural Networks ----
