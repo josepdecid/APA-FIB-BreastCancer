@@ -21,6 +21,27 @@ install.packages('lfda')
 install.packages('xgboost')
 ```
 
+```{R Utils}
+harmMean <- function(elements) {
+  return(length(elements) / sum(1 / elements))
+}
+
+getAccuracyReport <- function(Truth, Pred) {
+  conf <- table(Truth = Truth,
+                Pred = Pred)
+  
+  # Percent of each class and accuracy
+  props <- prop.table(conf, 1)
+  accuracy <- sum(diag(conf)) / sum(conf)
+
+  # Results
+  print(conf)
+  print(paste0('Accuracy: ', round(100 * accuracy, 4), '%'))
+  print(paste0('Error: ', round(100 * (1 - accuracy), 4), '%'))
+  print(paste0('F1: ', round(100 * harmMean(diag(props)), 4), '%'))
+}
+```
+
 ####################################################################
 SECTION 1: Data Preprocessing
 ####################################################################
@@ -47,10 +68,11 @@ diagnosis <- factor(dataset$diagnosis, levels(dataset$diagnosis)[c(2, 1)])
 dataset$diagnosis <- diagnosis
 
 summary(dataset$diagnosis)
-plot(x = diagnosis,
-     main = 'Diagnosis distribution',
-     xlab = 'Diagnosis',
-     ylab = 'Count')
+ggplot(dataset, aes(diagnosis)) +
+  geom_bar(aes(fill = diagnosis)) +
+  ggtitle('Diagnosis distribution') +
+  xlab('Diagnosis') + ylab('Count') +
+  guides(fill = guide_legend(title = 'Diagnosis'))
 
 # Feature scaling
 dataset[, -1] <- scale(dataset[, -1],
@@ -98,8 +120,10 @@ split it into Training and Test set.
 
 ```{R Split dataset}
 library(caTools)
-set.seed(22413)
+
+set.seed(42)
 split = sample.split(Y = dataset$diagnosis, SplitRatio = 0.8)
+
 training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
 ```
@@ -129,28 +153,56 @@ ggplot(pca.df, mapping = aes(x = PC1, y = PC2, col = diagnosis)) +
 ```
 
 ####################################################################
-# SECTION 2: Model Building
+# SECTION 2: Model Building - Linear Methods
 ####################################################################
 
-```{R Util function}
-harmMean <- function(elements) {
-  return(length(elements) / sum(1 / elements))
-}
+Let's start looking for a logistic regression model for classification into binomial data. We start setting an arbitrary centered threshold at 0.5.
 
-getAccuracyReport <- function(Truth, Pred) {
-  conf <- table(Truth = Truth,
-                Pred = Pred)
-  
-  # Percent of each class and accuracy
-  props <- prop.table(conf, 1)
-  accuracy <- sum(diag(conf)) / sum(conf)
+```{R - Logistic}
+classifier.log <- glm(formula = diagnosis ~ .,
+                      family = binomial,
+                      data = training.set)
 
-  # Results
-  print(conf)
-  print(paste0('Accuracy: ', round(100 * accuracy, 4), '%'))
-  print(paste0('Error: ', round(100 * (1 - accuracy), 4), '%'))
-  print(paste0('F1: ', round(100 * harmMean(diag(props)), 4), '%'))
-}
+classifier.log.aic <- step(classifier.log)
+
+prob.log <- predict(classifier.log,
+                    type = 'response',
+                    newdata = test.set[-1])
+pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.log)
+```
+
+```{R - Logistic: Optimal P}
+p.possible <- seq(0, 1, by = 0.01)
+
+classifier.log <- glm(formula = diagnosis ~ .,
+                      family = binomial,
+                      data = training.set)
+
+prob.log <- predict(classifier.log,
+                    type = 'response',
+                    newdata = test.set[-1])
+
+errors <- sapply(X = p.possible, FUN = function(p) {
+  prob <- as.factor(ifelse(prob.log >= p, 'M', 'B'))
+  conf <- table(test.set$diagnosis, prob)
+  return(1 - sum(diag(conf)) / sum(conf))
+})
+
+min(errors)
+lowest.error <- as.integer(which.min(errors))
+(p.best <- p.possible[lowest.error])
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = ifelse(prob.log >= p.best, 'M', 'B'))
+
+ggplot(test.set) +
+  xlab('Observation') + ylab('Probability') +
+  geom_line(aes(x = seq(nrow(test.set)), y = 0.5), linetype = 'dotted') +
+  geom_line(aes(x = seq(nrow(test.set)), y = p.best), colour = 'purple') +
+  geom_point(aes(x = seq(nrow(test.set)), y = prob.log, col = diagnosis))
 ```
 
 ```{R LDA model}
@@ -189,7 +241,6 @@ ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
 ```{R Naive Bayes}
 library(e1071)
 
-set.seed(22413)
 model.nb <- naiveBayes(formula = diagnosis ~ .,
                        data = training.set)
 model.nb
@@ -288,53 +339,6 @@ getAccuracyReport(Truth = test.set$diagnosis,
 library(pROC)
 roc_knn <- roc(test.set$diagnosis, as.numeric(pred.knn == 'M'))
 plot(roc_knn, xlim = c(1.0,0.0))
-```
-
-```{R - Logistic}
-classifier.log <- glm(formula = diagnosis ~ .,
-                      family = binomial,
-                      data = training.set)
-
-classifier.log.aic <- step(classifier.log)
-
-prob.log <- predict(classifier.log,
-                    type = 'response',
-                    newdata = test.set[-1])
-pred.log <- ifelse(prob.log > 0.5, 'M', 'B')
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = pred.log)
-```
-
-```{R - Logistic: Optimal P}
-p.possible <- seq(0, 1, by = 0.01)
-
-classifier.log <- glm(formula = diagnosis ~ .,
-                      family = binomial,
-                      data = training.set)
-
-prob.log <- predict(classifier.log,
-                    type = 'response',
-                    newdata = test.set[-1])
-
-errors <- sapply(X = p.possible, FUN = function(p) {
-  prob <- as.factor(ifelse(prob.log >= p, 'M', 'B'))
-  conf <- table(test.set$diagnosis, prob)
-  return(1 - sum(diag(conf)) / sum(conf))
-})
-
-min(errors)
-lowest.error <- as.integer(which.min(errors))
-(p.best <- p.possible[lowest.error])
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = ifelse(prob.log >= p.best, 'M', 'B'))
-
-ggplot(test.set) +
-  xlab('Observation') + ylab('Probability') +
-  geom_line(aes(x = seq(nrow(test.set)), y = 0.5), linetype = 'dotted') +
-  geom_line(aes(x = seq(nrow(test.set)), y = p.best), colour = 'purple') +
-  geom_point(aes(x = seq(nrow(test.set)), y = prob.log, col = diagnosis))
 ```
 
 ```{R - SVM}
@@ -526,20 +530,6 @@ colnames(vars) = c('Importance', 'Count')
 vars
 ```
 
-```{R - SVM: Gaussian Kernel}
-classifier.svm.gaussian <- svm(formula = diagnosis ~ .,
-                               data = training.set,
-                               type = 'C-classification',
-                               kernel = 'radial')
-classifier.svm.gaussian
-
-pred.svm.gaussian <- predict(classifier.svm.gaussian,
-                             newdata = test.set)
-
-getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = pred.svm.gaussian)
-```
-
 # Neural Networks ----
 Let's try a neural net with 10 neurons inside the hidden layer.
 ```{R Neural Networks}
@@ -600,6 +590,38 @@ pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.nn)
 
+```
+
+```{R - SVM: Gaussian Kernel}
+classifier.svm.gaussian <- svm(formula = diagnosis ~ .,
+                               data = training.set,
+                               type = 'C-classification',
+                               kernel = 'radial')
+classifier.svm.gaussian
+
+pred.svm.gaussian <- predict(classifier.svm.gaussian,
+                             newdata = test.set)
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.svm.gaussian)
+```
+
+```{R - SVM: C & Gamma optimization}
+classifier.svm.gaussian.cv = tune.svm(x = diagnosis ~ .,
+                                      data = training.set,
+                                      cost = 10^seq(-8, 3),
+                                      gamma = 2^seq(-3, 4),
+                                      type = 'C-classification',
+                                      kernel = 'radial',
+                                      tunecontrol = tune.control(cross = 12))
+
+classifier.svm.gaussian.cv
+
+pred.svm.gaussian.cv <- predict(classifier.svm.gaussian.cv$best.model,
+                              newdata = test.set)
+
+getAccuracyReport(Truth = test.set$diagnosis,
+                  Pred = pred.svm.gaussian.cv)
 ```
 
 # Gradient Boosting ----
