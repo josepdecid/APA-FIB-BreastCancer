@@ -257,7 +257,7 @@ getAccuracyReport(Truth = test.set$diagnosis,
 
 library(pROC)
 roc_knn <- roc(test.set$diagnosis, as.numeric(pred.knn == 'M'))
-plot(roc_knn)
+plot(roc_knn, xlim = c(1.0,0.0))
 ```
 
 ```{R - Logistic}
@@ -608,6 +608,8 @@ pred.xgb <- predict(classifier.xgb,
 # SECTION 3: Model Comparaison
 ####################################################################
 
+
+```{R}
 classifiers <- list(
   KNN = classifier.knn,
   SVM = classifier.svm.poly,
@@ -616,3 +618,16 @@ classifiers <- list(
   GB = classifier.xgb)
 
 models.corr <- modelCor(classifiers)
+```
+
+We plot ROC curves which represent False Positive rate against True Positives rate. This gives us an accuracy estimation of out model.
+```{R}
+for (model in classifiers){
+  pred = predict(model, newdata = test.set)
+  roc_curve = roc(response = as.numeric(test.set$diagnosis), 
+                  predictor = as.numeric(pred))
+  plot(roc_curve, add = TRUE)
+}
+legend(0.35, 0.45, c('knn', 'svm.poly', 'rf','nnet','xgb'), 2:6)
+
+```
