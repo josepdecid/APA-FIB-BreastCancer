@@ -86,6 +86,7 @@ diagnosis <- factorOrdered(dataset$diagnosis)
 dataset$diagnosis <- diagnosis
 
 summary(dataset$diagnosis)
+library(ggplot2)
 ggplot(dataset, aes(diagnosis)) +
   geom_bar(aes(fill = diagnosis)) +
   ggtitle('Diagnosis distribution') +
