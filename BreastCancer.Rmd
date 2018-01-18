@@ -19,6 +19,8 @@ install.packages('caret')
 install.packages('e1071')
 install.packages('lfda')
 install.packages('xgboost')
+install.packages('pROC')
+install.packages('tree')
 ```
 
 ```{R Utils}
@@ -27,12 +29,12 @@ harmMean <- function(elements) {
 }
 
 factorOrdered <- function(categories) {
-  return(factor(categories, levels(as.factor(categories))[c(2, 1)]))
+  return(factor(categories, levels = c('M', 'B')))
 }
 
 getAccuracyReport <- function(Truth, Pred) {
   conf <- table(Truth = Truth,
-                Pred = Pred)
+                Pred = factorOrdered(Pred))
   
   # Percent of each class and accuracy
   props <- prop.table(conf, 1)
@@ -121,7 +123,7 @@ featurePlot(x = dataset[, -1],
             y = dataset$diagnosis,
             plot = 'density',
             scales = scales,
-            layout = c(6,4),
+            layout = c(3, 8),
             col = c('#F8766D', '#00BFC4'),
             auto.key = list(columns = 2),
             pch = '|')
@@ -139,7 +141,7 @@ training.set = subset(dataset, split == TRUE)
 test.set = subset(dataset, split == FALSE)
 ```
 
-Now let's apply feature extraction (PCA) because we can easily reduce dimensionality without losing so much information. With 10 components we get over 0.95 of variance explained (16 for 0.99). We would need all the others only to explain an extra 1%, so those are discarded.
+Now let's apply feature extraction (PCA) because we can easily reduce dimensionality without losing so much information. With 10 components we get over 0.95 of variance explained (16 for 0.99). We would need all the others only to explain an extra 1%, so those would be discarded.
 
 ```{R PCA}
 pca <- prcomp(dataset[, -1])
@@ -192,7 +194,7 @@ prob.log <- predict(model.log.aic,
 pred.log <- ifelse(prob.log > 0.5, 'B', 'M')
 
 getAccuracyReport(Truth = test.set$diagnosis,
-                  Pred = factorOrdered(pred.log))
+                  Pred = pred.log)
 
 ggplot(test.set) +
   xlab('Observation') + ylab('Probability') +
@@ -229,7 +231,7 @@ pred.lda <- predict(lda, test.set, type = 'prob')
 # Display diagnosis over 1D.
 ggplot(training.set.lda, aes(x = LD1, y = 0, col = diagnosis)) +
   ggtitle('Diagnosis distribution over LD1') +
-  geom_point(alpha = 0.8) + theme(legend.position="none")
+  geom_point(alpha = 0.8)
 
 # Display diagnosis over 2D (Density).
 ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
@@ -432,7 +434,7 @@ model.rf <- randomForest(formula = diagnosis ~ .,
 model.rf
 ```
 
-We get an estimated test error (OOB) of 5.17%. Let's compute the real test error:
+We get an estimated test error (OOB) of 4.61%. Let's compute the real test error:
 
 ```{R - Random Forest: test accuracy}
 pred.rf <- predict(model.rf,
@@ -553,38 +555,44 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.rf)
 ```
 
-# Neural Networks ----
+
 Let's try a neural net with 10 neurons inside the hidden layer.
+
 ```{R Neural Networks}
 library(nnet)
-set.seed(22413)
+
+set.seed(10)
 model.nn <- nnet(formula = diagnosis ~ .,
-                      data = training.set,
-                      size = 10, maxit = 2000, decay = 0)
-pred.nn <- as.factor(predict(classifier.nn, type = 'class'))
+                 data = training.set,
+                 size = 10,
+                 maxit = 2000,
+                 decay = 0)
+
+pred.nn <- as.factor(predict(model.nn,
+                             type = 'class'))
 
 getAccuracyReport(Truth = training.set$diagnosis,
                   Pred = pred.nn)
 ```
 
 Predicted error from training is 0% in our case so let's try to get test error directly in order to make improvements on our neural net.
-```{R}
 
-pred.nn <- as.factor(predict(classifier.nn, newdata = test.set, type = 'class'))
+```{R}
+pred.nn <- as.factor(predict(model.nn, newdata = test.set, type = 'class'))
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.nn)
 ```
 
-Now let's train for different size and decay values to find the best nnet, using cross-validation
-# This method finds that best number of hidden units is 6 and decay weight value 0.03162278
+Now let's train for different size and decay values to find the best nnet, using cross-validation. This method finds that best number of hidden units is 6 and decay weight value 0.03162278.
 This takes some minutes to compute!
 
 ```{R}
-train_control <- trainControl(method = 'cv', number = 10)
+train_control <- trainControl(method = 'cv', number = 12)
 grid <- expand.grid(decay = 10^seq(-3, 0, 0.1),
                     size = seq(1, 10))
-set.seed(42)
+
+set.seed(10)
 nnet <- train(form = diagnosis ~.,
               data = training.set,
               method = 'nnet', 
@@ -597,16 +605,51 @@ nnet
 pred.nn <- as.factor(predict(nnet, type = 'raw'))
 getAccuracyReport(Truth = training.set$diagnosis,
                   Pred = pred.nn)
-# 98.2% accuracy
 ```
+
 Now we test the optimal neural net with test set
+
 ```{R}
-pred.nn <- as.factor(predict(nnet, newdata = test.set, type = 'raw'))
+pred.nn <- as.factor(predict(nnet,
+                             newdata = test.set,
+                             type = 'raw'))
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.nn)
 
 ```
+
+How about if we try to use LDA data into a NN?
+
+```{R - Neural Network: LDA}
+train.control <- trainControl(method = 'cv', number = 12)
+grid <- expand.grid(decay = 10^seq(-3, 0, 0.1),
+                    size = seq(1, 10))
+
+set.seed(10)
+nnet <- train(form = diagnosis ~.,
+              data = training.set.lda,
+              method = 'nnet', 
+              tuneGrid = grid, 
+              trControl = train.control,
+              trace = FALSE)
+nnet
+
+pred.nn.lda <- as.factor(predict(nnet, type = 'raw'))
+getAccuracyReport(Truth = training.set.lda$diagnosis,
+                  Pred = pred.nn.lda)
+```
+
+```{R - Neural Network: Best model over LDA?}
+pred.nn.lda <- as.factor(predict(nnet,
+                                 newdata = test.set.lda,
+                                 type = 'raw'))
+
+getAccuracyReport(Truth = test.set.lda$diagnosis,
+                  Pred = pred.nn.lda)
+```
+
+Wow, 100%!
 
 ```{R - SVM: Gaussian Kernel}
 model.svm.gaussian <- svm(formula = diagnosis ~ .,
@@ -640,7 +683,7 @@ getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.svm.gaussian.cv)
 ```
 
-# Gradient Boosting ----
+Testing Gradient Boosting (discarded)
 tune.xgb <- expand.grid(
   eta = c(0.01, 0.001, 0.0001),
   nrounds = 500,
@@ -667,39 +710,49 @@ pred.xgb <- predict(classifier.xgb,
 # SECTION 4: Model Comparaison
 ####################################################################
 
-
-```{R}
-classifiers <- list(
-  LOG = model.log,
-  NB = model.nb.lda,
-  SVML = model.svm.linear.cv$best.model,
-  RF = model.rf,
-  NN = model.nn,
-  SVMG = model.svm.gaussian.cv$best.model
-)
-```
-
 We plot ROC curves which represent False Positive rate against True Positives rate. This gives us an accuracy estimation of out model.
+
 ```{R}
-ggplot(roc.data) +
-  geom_roc()
+par(mfrow = c(4, 2))
 
-multiplot(p1, p2, p3, p4, cols=2)
-plots <- apply(classifiers, FUN = function(model) {
-  pred = predict(model,
-                 newdata = test.set)
-  
-  D.ex <- rbinom(50, 1, .5)
-  roc.data <- data.frame(
-    D = c(D.ex, D.ex), 
-    M = c(rnorm(50, mean = D.ex, sd = .4), rnorm(50, mean = D.ex, sd = 1)), 
-    Z = c(rep("A", 50), rep("B", 50))
-  )
-    
-  plot <- ggplot(roc.data, aes(m = M, d = D)) + geom_roc()
-  return(plot)
-})
+# Logistic ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(as.factor(pred.log))),
+     col = '#9C27B0', main = 'Logistic Regression')
 
-par(mfrow = c(4,2))
+# LDA ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(test.set.lda$diagnosis)),
+     col = '#009688', main = 'LDA')
+
+# Naive Bayes ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(pred.nb.lda)),
+     col = '#FF9800', main = 'Naive Bayes (over LDA)')
+
+# K-NN ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(pred.knn)),
+     col = '#795548', main = 'K-NN')
+
+# SVM linear ROC
+plot(roc(response = test.set$diagnosis,  
+          predictor = as.numeric(pred.svm.linear.cv)),
+     col = '#8BC34A', main = 'Linear SVM')
+
+# Random Forest ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(pred.rf)),
+     col = '#03A9F4', main = 'Random Forest')
+
+# Neural Network ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(pred.nn.lda)),
+     col = '#F44336', main = 'MLP (over LDA)')
+
+# SVM Gaussian ROC
+plot(roc(response = test.set$diagnosis,  
+         predictor = as.numeric(pred.svm.gaussian.cv)),
+     col = '#3F51B5', main = 'Radial SVM')
 
 ```
