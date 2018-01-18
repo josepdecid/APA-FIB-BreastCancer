@@ -135,7 +135,6 @@ featurePlot(x = dataset[, -1],
             plot = 'density',
             scales = scales,
             layout = c(3, 8),
-            col = c('#F8766D', '#00BFC4'),
             auto.key = list(columns = 2),
             pch = '|')
 ```
@@ -340,9 +339,6 @@ pred.knn <- knn(train = training.set[-1],
 
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.knn)
-
-roc_knn <- roc(test.set$diagnosis, as.numeric(pred.knn == 'M'))
-plot(roc_knn, xlim = c(1.0,0.0))
 ```
 
 ```{R - SVM}
@@ -384,7 +380,7 @@ We obtain a higher accuracy, but all errors are false negatives. Let's try to mo
 model.svm.linear <- svm(formula = diagnosis ~ .,
                         data = training.set,
                         cost = model.svm.linear.cv$best.parameters$cost,
-                        class.weights = c(M = 5, B = 0.0000000001),
+                        class.weights = c(M = 5, B = 1),
                         type = 'C-classification',
                         kernel = 'linear')
 model.svm.linear
@@ -408,8 +404,8 @@ model.dt <- tree(formula = diagnosis ~ .,
 
 summary(model.dt)
 
-plot (model.dt)
-text (model.dt, pretty = 0)
+plot(model.dt)
+text(model.dt)
 
 pred.dt <- predict(model.dt,
                    newdata = test.set,
@@ -713,40 +709,47 @@ par(mfrow = c(4, 2))
 plot(roc(response = test.set$diagnosis,  
          predictor = as.numeric(as.factor(pred.log))),
      col = '#9C27B0', main = 'Logistic Regression')
+abline(v = 1, lty = 'dotted')
 
 # LDA ROC
 plot(roc(response = test.set$diagnosis,  
          predictor = as.numeric(test.set.lda$diagnosis)),
      col = '#009688', main = 'LDA')
+abline(v = 1, lty = 'dotted')
 
 # Naive Bayes ROC
-plot(roc(response = test.set$diagnosis,  
+plot(roc(response = test.set.lda$diagnosis,  
          predictor = as.numeric(pred.nb.lda)),
      col = '#FF9800', main = 'Naive Bayes (over LDA)')
+abline(v = 1, lty = 'dotted')
 
 # K-NN ROC
 plot(roc(response = test.set$diagnosis,  
          predictor = as.numeric(pred.knn)),
      col = '#795548', main = 'K-NN')
+abline(v = 1, lty = 'dotted')
 
 # SVM linear ROC
 plot(roc(response = test.set$diagnosis,  
           predictor = as.numeric(pred.svm.linear.cv)),
      col = '#8BC34A', main = 'Linear SVM')
+abline(v = 1, lty = 'dotted')
 
 # Random Forest ROC
 plot(roc(response = test.set$diagnosis,  
          predictor = as.numeric(pred.rf)),
      col = '#03A9F4', main = 'Random Forest')
+abline(v = 1, lty = 'dotted')
 
 # Neural Network ROC
-plot(roc(response = test.set$diagnosis,  
+plot(roc(response = test.set.lda$diagnosis,  
          predictor = as.numeric(pred.nn.lda)),
      col = '#F44336', main = 'MLP (over LDA)')
+abline(v = 1, lty = 'dotted')
 
 # SVM Gaussian ROC
 plot(roc(response = test.set$diagnosis,  
          predictor = as.numeric(pred.svm.gaussian.cv)),
      col = '#3F51B5', main = 'Radial SVM')
-
+abline(v = 1, lty = 'dotted')
 ```
