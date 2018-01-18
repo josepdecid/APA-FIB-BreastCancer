@@ -9,18 +9,30 @@ Q1 2017-2018
 First install necessary packages, skip  this step or some installations
 if some are already installed.
 
-```{Setup}
-install.packages('corrplot')
-install.packages('caTools')
-install.packages('ggplot2')
-install.packages('rpart')
-install.packages('randomForest')
-install.packages('caret')
-install.packages('e1071')
-install.packages('lfda')
-install.packages('xgboost')
-install.packages('pROC')
-install.packages('tree')
+```{R Setup}
+# install.packages('corrplot')
+# install.packages('caTools')
+# install.packages('ggplot2')
+# install.packages('rpart')
+# install.packages('randomForest')
+# install.packages('caret')
+# install.packages('e1071')
+# install.packages('lfda')
+# install.packages('xgboost')
+# install.packages('pROC')
+# install.packages('tree')
+
+library(corrplot)
+library(caret)
+library(caTools)
+library(ggplot2)
+library(MASS)
+library(e1071)
+library(class)
+library(pROC)
+library(nnet)
+library(tree)
+library(randomForest)
 ```
 
 ```{R Utils}
@@ -89,7 +101,6 @@ dataset[, -1] <- scale(dataset[, -1],
 Let's look at the variables to check some correlation, and try to remove unnecessary predictors with high correlation among them.
 
 ```{R Correlation}
-library(corrplot)
 correlation <- cor(dataset[, -1])
 corrplot(corr = correlation,
          order = 'hclust',
@@ -114,7 +125,6 @@ dataset$area_worst <- NULL
 We can explore how each features helps us to classify the data. 
 
 ```{R Separability of each variable}
-library(caret)
 scales <- list(x = list(relation = 'free'),
                y = list(relation = 'free'),
                cex = 0.6)
@@ -132,8 +142,6 @@ featurePlot(x = dataset[, -1],
 Once the dataset basic preprocessing is ready we proceed to split it into Training and Test set.
 
 ```{R Split dataset}
-library(caTools)
-
 set.seed(10)
 split = sample.split(Y = dataset$diagnosis, SplitRatio = 0.8)
 
@@ -148,7 +156,6 @@ pca <- prcomp(dataset[, -1])
 vars = apply(pca$x, 2, var)
 props <- vars / sum(vars)
 
-library(ggplot2)
 ggplot(mapping = aes(x = seq(1, length(props)), y = cumsum(props))) +
   geom_bar(stat = "identity", fill = '#00BA38') +
   geom_line(aes(x = seq(1, length(props)), y = 0.95), linetype = 'dotted') +
@@ -208,7 +215,6 @@ As probabilities of M and B are almost 1 or 0 there is no way to improve the P s
 Let's check data separability with LDA:
 
 ```{R LDA model}
-library(MASS)
 lda <- lda(formula = diagnosis ~ .,
            data = training.set)
 
@@ -242,8 +248,6 @@ ggplot(training.set.lda, aes(x = LD1, fill = diagnosis)) +
 Let's apply a basic Naive Bayes: 
 
 ```{R Naive Bayes}
-library(e1071)
-
 model.nb <- naiveBayes(formula = diagnosis ~ .,
                        data = training.set)
 model.nb
@@ -276,8 +280,6 @@ It is quite perfect! And we also got no false negative errors.
 Fit a K-NN model with an arbitrary K.
 
 ```{R - KNN}
-library(class)
-
 pred.knn <- knn(train = training.set[-1],
                 test = test.set[-1],
                 cl = training.set$diagnosis,
@@ -338,14 +340,11 @@ pred.knn <- knn(train = training.set[-1],
 getAccuracyReport(Truth = test.set$diagnosis,
                   Pred = pred.knn)
 
-library(pROC)
 roc_knn <- roc(test.set$diagnosis, as.numeric(pred.knn == 'M'))
 plot(roc_knn, xlim = c(1.0,0.0))
 ```
 
 ```{R - SVM}
-library(e1071)
-
 model.svm.linear <- svm(formula = diagnosis ~ .,
                         data = training.set,
                         type = 'C-classification',
@@ -403,8 +402,6 @@ getAccuracyReport(Truth = test.set$diagnosis,
 Let's try with a single decision tree and check the training error rate and the test results report.
 
 ```{R - Random Forest: Single decision tree}
-library(tree)
-
 model.dt <- tree(formula = diagnosis ~ .,
                  data = training.set)
 
@@ -424,8 +421,6 @@ getAccuracyReport(Truth = test.set$diagnosis,
 We get a high-performance for being just a unique tree, but let's create an aggregation of them and see what happens.
 
 ```{R - Random Forest}
-library(randomForest)
-
 set.seed(10)
 model.rf <- randomForest(formula = diagnosis ~ .,
                          data = training.set,
@@ -559,8 +554,6 @@ getAccuracyReport(Truth = test.set$diagnosis,
 Let's try a neural net with 10 neurons inside the hidden layer.
 
 ```{R Neural Networks}
-library(nnet)
-
 set.seed(10)
 model.nn <- nnet(formula = diagnosis ~ .,
                  data = training.set,
